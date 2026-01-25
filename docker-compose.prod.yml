@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: kartcis-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-kartcis}
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    container_name: kartcis-backend
+    ports:
+      - "8000:8000" # Expose internal for debug if needed, normally not needed if proxy is used
+    volumes:
+      - ./uploads:/app/uploads
+    environment:
+      - DATABASE_URL=host=db user=${POSTGRES_USER:-postgres} password=${POSTGRES_PASSWORD:-password} dbname=${POSTGRES_DB:-kartcis} port=5432 sslmode=disable
+      - JWT_SECRET=${JWT_SECRET}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+      - SMTP_FROM=${SMTP_FROM}
+      - FRONTEND_URL=${FRONTEND_URL}
+      - API_URL=${API_URL}
+      - PORT=8000
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: always
+
+  proxy:
+    image: nginx:alpine
+    container_name: kartcis-proxy
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+      # Share uploads volume so nginx can serve static files directly (faster!)
+      - ./uploads:/app/uploads
+    depends_on:
+      - backend
+    restart: always
+
+volumes:
+  postgres_data_prod:
