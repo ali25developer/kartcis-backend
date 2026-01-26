@@ -1,39 +1,59 @@
-# Stage 1: Build
-FROM golang:1.24-alpine AS builder
+services:
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: kartcis
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - kartcis-network
 
-WORKDIR /app
+  migrate:
+    image: migrate/migrate
+    restart: "no"
+    volumes:
+      - ./migrations:/migrations:ro
+    command:
+      - -path=/migrations
+      - -database=postgres://postgres:password@db:5432/kartcis?sslmode=disable
+      - up
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - kartcis-network
 
-# Install dependencies (git needed for some go get)
-RUN apk add --no-cache git
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: "8000"
+      DATABASE_URL: "host=db user=postgres password=password dbname=kartcis port=5432 sslmode=disable"
+      JWT_SECRET: "rahasia_negara_123"
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      FRONTEND_URL: "http://kartcis.id"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - kartcis-network
 
-# Download modules
-COPY go.mod go.sum ./
-RUN go mod download
+networks:
+  kartcis-network:
+    driver: bridge
 
-# Copy source code
-COPY . .
-
-# Build the binary
-# CGO_ENABLED=0 -> Static binary (no C dependency)
-# -w -s -> Strip debug info (smaller binary)
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o main .
-
-# Stage 2: Runtime (Minimal image)
-FROM alpine:latest
-
-WORKDIR /app
-
-# Install CA certificates for HTTPS calls (e.g. to payment gateway)
-RUN apk --no-cache add ca-certificates tzdata
-
-# Copy binary from builder
-COPY --from=builder /app/main .
-
-# Create uploads directory
-RUN mkdir -p uploads
-
-# Expose port
-EXPOSE 8000
-
-# Run the binary
-CMD ["./main"]
+volumes:
+  postgres_data:
