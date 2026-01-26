@@ -1,28 +1,26 @@
-version: '3.8'
-
 services:
   db:
     image: postgres:15-alpine
-    container_name: kartcis-db
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
       POSTGRES_DB: kartcis
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+    networks:
+      - kartcis-network
 
   migrate:
     image: migrate/migrate
-    container_name: kartcis-migrate
+    restart: "no"
     volumes:
-      - ./migrations:/migrations
+      - ./migrations:/migrations:ro
     command:
       - -path=/migrations
       - -database=postgres://postgres:password@db:5432/kartcis?sslmode=disable
@@ -30,29 +28,32 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    restart: on-failure
+    networks:
+      - kartcis-network
 
   backend:
-    build: .
-    container_name: kartcis-backend
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
     ports:
       - "8000:8000"
-    volumes:
-      - .:/app
-      - ./uploads:/app/uploads
-    working_dir: /app
-    command: air -c .air.toml
     environment:
-      - PORT=8000
-      - DATABASE_URL=host=db user=postgres password=password dbname=kartcis port=5432 sslmode=disable
-      - JWT_SECRET=rahasia_negara_123
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-      - FRONTEND_URL=http://localhost:5173
+      PORT: "8000"
+      DATABASE_URL: "host=db user=postgres password=password dbname=kartcis port=5432 sslmode=disable"
+      JWT_SECRET: "rahasia_negara_123"
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      FRONTEND_URL: "http://kartcis.id"
     depends_on:
       migrate:
         condition: service_completed_successfully
-    restart: on-failure
+    networks:
+      - kartcis-network
+
+networks:
+  kartcis-network:
+    driver: bridge
 
 volumes:
   postgres_data:
