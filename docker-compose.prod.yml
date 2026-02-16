@@ -22,6 +22,7 @@ services:
       context: .
       dockerfile: Dockerfile.prod
     container_name: kartcis-backend
+    env_file: .env
     ports:
       - "8000:8000" # Expose internal for debug if needed, normally not needed if proxy is used
     volumes:
@@ -36,6 +37,12 @@ services:
       - SMTP_FROM=${SMTP_FROM}
       - FRONTEND_URL=${FRONTEND_URL}
       - API_URL=${API_URL}
+      - IMAP_HOST=${IMAP_HOST}
+      - IMAP_PORT=${IMAP_PORT}
+      - IMAP_USER=${IMAP_USER}
+      - IMAP_PASS=${IMAP_PASS}
+      - JAGO_ACCOUNT_NUMBER=${JAGO_ACCOUNT_NUMBER}
+      - JAGO_ACCOUNT_NAME=${JAGO_ACCOUNT_NAME}
       - PORT=8000
     depends_on:
       db:
