@@ -165,9 +165,10 @@ func CreateOrder(c *gin.Context) {
 
 	// Handle Unique Code for Manual Bank Transfer
 	var uniqueCode int
-	if strings.HasPrefix(req.PaymentMethod, "BANK_TRANSFER_") {
-		// Generate 3 digit unique code 100-999
-		uniqueCode = rand.Intn(900) + 100
+	if strings.HasPrefix(req.PaymentMethod, "BANK_TRANSFER_") || req.PaymentMethod == "MANUAL_JAGO" {
+		// Generate 3 digit unique code 101-999 (avoid 000-100 for safety)
+		rand.Seed(time.Now().UnixNano())
+		uniqueCode = rand.Intn(899) + 101
 	}
 
 	// Create Order
@@ -572,7 +573,7 @@ func processPaymentGateway(order *models.Order, paymentMethod string, userID *ui
 	}
 
 	// 4. Bank Transfer (Jago)
-	if strings.Contains(paymentMethod, "BANK_TRANSFER_JAGO") {
+	if strings.Contains(paymentMethod, "BANK_TRANSFER_JAGO") || paymentMethod == "MANUAL_JAGO" {
 		// Set Payment Instruction
 		accNo := os.Getenv("JAGO_ACCOUNT_NUMBER")
 		accName := os.Getenv("JAGO_ACCOUNT_NAME")
