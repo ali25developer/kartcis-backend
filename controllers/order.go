@@ -166,9 +166,27 @@ func CreateOrder(c *gin.Context) {
 	// Handle Unique Code for Manual Bank Transfer
 	var uniqueCode int
 	if strings.HasPrefix(req.PaymentMethod, "BANK_TRANSFER_") || req.PaymentMethod == "MANUAL_JAGO" {
-		// Generate 3 digit unique code 101-999 (avoid 000-100 for safety)
+		// Generate unique code and ensure TOTAL AMOUNT is unique for pending orders
 		rand.Seed(time.Now().UnixNano())
-		uniqueCode = rand.Intn(899) + 101
+		baseAmount := totalAmount + totalAdminFee
+
+		for i := 0; i < 10; i++ { // Try up to 10 times to find a unique total amount
+			code := rand.Intn(899) + 101
+			checkTotal := baseAmount + float64(code)
+
+			var existing int64
+			tx.Model(&models.Order{}).Where("status = ? AND total_amount = ?", "pending", checkTotal).Count(&existing)
+
+			if existing == 0 {
+				uniqueCode = code
+				break
+			}
+		}
+
+		// Fallback (extremely unlikely to fail 10 times in a row unless massive traffic)
+		if uniqueCode == 0 {
+			uniqueCode = rand.Intn(899) + 101
+		}
 	}
 
 	// Create Order
