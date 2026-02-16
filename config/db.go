@@ -56,6 +56,12 @@ func ConnectDB() {
 	if !DB.Migrator().HasColumn(&models.Order{}, "payment_data") {
 		DB.Migrator().AddColumn(&models.Order{}, "payment_data")
 	}
+	if !DB.Migrator().HasColumn(&models.Order{}, "unique_code") {
+		DB.Migrator().AddColumn(&models.Order{}, "unique_code")
+	}
+	if !DB.Migrator().HasColumn(&models.Order{}, "payment_instructions") {
+		DB.Migrator().AddColumn(&models.Order{}, "payment_instructions")
+	}
 	// Ensure history table exists just in case
 	if !DB.Migrator().HasTable(&models.OrderStatusHistory{}) {
 		DB.Migrator().CreateTable(&models.OrderStatusHistory{})

@@ -15,6 +15,7 @@ func main() {
 
 	// Start Background Jobs
 	jobs.StartOrderExpiryJob()
+	jobs.StartPaymentCheckerJob()
 
 	// Setup Router
 	r := routes.SetupRouter()

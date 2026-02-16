@@ -3,6 +3,7 @@ package controllers
 import (
 	"fmt"
 	"kartcis-backend/config"
+	"kartcis-backend/jobs"
 	"kartcis-backend/models"
 	"kartcis-backend/utils"
 	"net/http"
@@ -10,7 +11,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 func AdminGetTransactions(c *gin.Context) {
@@ -100,7 +100,7 @@ func CancelTransaction(c *gin.Context) {
 	}
 
 	// Restore Quota
-	if err := RestoreQuota(tx, order.ID); err != nil {
+	if err := utils.RestoreQuota(tx, order.ID); err != nil {
 		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to restore quota"})
 		return
@@ -116,29 +116,10 @@ func CancelTransaction(c *gin.Context) {
 
 	tx.Commit()
 
+	// Send Cancellation Email
+	utils.SendOrderCancelledEmail(order, "Dibatalkan oleh Admin")
+
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Transaction cancelled and quota restored"})
-}
-
-// RestoreQuota helper
-func RestoreQuota(tx *gorm.DB, orderID uint) error {
-	var tickets []models.Ticket
-	if err := tx.Where("order_id = ?", orderID).Find(&tickets).Error; err != nil {
-		return err
-	}
-
-	// Group by ticket type
-	counts := make(map[uint]int)
-	for _, t := range tickets {
-		counts[t.TicketTypeID]++
-	}
-
-	for ttID, count := range counts {
-		if err := tx.Model(&models.TicketType{}).Where("id = ?", ttID).
-			Update("available", gorm.Expr("available + ?", count)).Error; err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func MarkTransactionPaid(c *gin.Context) {
@@ -316,7 +297,7 @@ func UpdateTransactionStatus(c *gin.Context) {
 
 	// If status changed to cancelled/expired, restore quota
 	if (input.Status == "cancelled" || input.Status == "expired") && (oldStatus != "cancelled" && oldStatus != "expired") {
-		if err := RestoreQuota(tx, order.ID); err != nil {
+		if err := utils.RestoreQuota(tx, order.ID); err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to restore quota"})
 			return
@@ -332,6 +313,15 @@ func UpdateTransactionStatus(c *gin.Context) {
 	})
 
 	tx.Commit()
+
+	// If status changed to cancelled/expired, send email
+	if (input.Status == "cancelled" || input.Status == "expired") && (oldStatus != "cancelled" && oldStatus != "expired") {
+		reason := "Pesanan telah dibatalkan"
+		if input.Status == "expired" {
+			reason = "Waktu pembayaran telah habis (Expired)"
+		}
+		utils.SendOrderCancelledEmail(order, reason)
+	}
 
 	// If status changed to paid, send email
 	if input.Status == "paid" && oldStatus != "paid" {
@@ -349,4 +339,14 @@ func UpdateTransactionStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Transaction status updated", "data": order})
+}
+
+func AdminTriggerScraping(c *gin.Context) {
+	// Trigger the background job logic immediately
+	go jobs.CheckBankJagoEmails()
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Manual email scraping triggered. Check transaction logs in a few moments.",
+	})
 }

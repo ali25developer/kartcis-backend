@@ -1,11 +1,13 @@
 package routes
 
 import (
+	// Added
 	"kartcis-backend/controllers"
 	"kartcis-backend/middleware"
 	"net/http"
 	"os"
 
+	// Added
 	"github.com/gin-gonic/gin"
 )
 
@@ -33,8 +35,6 @@ func SetupRouter() *gin.Engine {
 
 	// Static Files (Images)
 	v1.Static("/uploads", "./uploads")
-	v1.GET("/test-email", controllers.TestEmail)
-	v1.GET("/test-payment-email", controllers.TestPaymentEmail)
 
 	// Auth
 	auth := v1.Group("/auth")
@@ -76,7 +76,6 @@ func SetupRouter() *gin.Engine {
 	// Orders (User)
 	userOrders := v1.Group("/orders")
 	v1.POST("/orders/payment-callback", controllers.PaymentCallback)
-	v1.POST("/orders/:order_number/simulate-payment", controllers.SimulatePayment)
 	// Let's check SimulatePayment in order.go: `orderNumber := c.Param("order_number")`. Yes.
 	// So if I rename route param to :order_number, I must update controller too.
 
@@ -160,6 +159,7 @@ func SetupRouter() *gin.Engine {
 		admin.POST("/transactions/:id/mark-paid", controllers.MarkTransactionPaid)
 		admin.PUT("/transactions/:id/status", controllers.UpdateTransactionStatus)
 		admin.GET("/transactions/:id/timeline", controllers.GetTransactionTimeline)
+		admin.POST("/transactions/trigger-scraping", controllers.AdminTriggerScraping)
 
 		// Reports
 		admin.GET("/reports/sales", controllers.AdminGetSalesReport)

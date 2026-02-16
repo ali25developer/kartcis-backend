@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -11,6 +12,8 @@ import (
 	"kartcis-backend/models"
 	"kartcis-backend/utils"
 	"strings"
+
+	"math/rand"
 
 	"github.com/gin-gonic/gin"
 )
@@ -160,6 +163,13 @@ func CreateOrder(c *gin.Context) {
 		}
 	}
 
+	// Handle Unique Code for Manual Bank Transfer
+	var uniqueCode int
+	if strings.HasPrefix(req.PaymentMethod, "BANK_TRANSFER_") {
+		// Generate 3 digit unique code 100-999
+		uniqueCode = rand.Intn(900) + 100
+	}
+
 	// Create Order
 	order := models.Order{
 		UserID:        userID,
@@ -167,8 +177,9 @@ func CreateOrder(c *gin.Context) {
 		CustomerName:  customerName,
 		CustomerEmail: customerEmail,
 		CustomerPhone: customerPhone,
-		TotalAmount:   totalAmount + totalAdminFee, // Add fee to total
+		TotalAmount:   totalAmount + totalAdminFee + float64(uniqueCode), // Add fee and unique code to total
 		AdminFee:      totalAdminFee,
+		UniqueCode:    uniqueCode,
 		Status:        "pending",
 		PaymentMethod: req.PaymentMethod,
 		CreatedAt:     time.Now(),
@@ -382,54 +393,6 @@ func PayOrder(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": order})
 }
 
-// Simulate Payment (Dev/Client Testing)
-func SimulatePayment(c *gin.Context) {
-	orderNumber := c.Param("order_number")
-
-	var order models.Order
-	// 1. Try find by order_number
-	if err := config.DB.Where("order_number = ?", orderNumber).First(&order).Error; err != nil {
-		// 2. Try find by ID if the parameter is numeric
-		if id, errConv := strconv.Atoi(orderNumber); errConv == nil {
-			if err := config.DB.Where("id = ?", id).First(&order).Error; err != nil {
-				c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Order not found"})
-				return
-			}
-		} else {
-			c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Order not found"})
-			return
-		}
-	}
-
-	now := time.Now()
-	config.DB.Model(&order).Updates(models.Order{
-		Status: "paid",
-		PaidAt: &now,
-	})
-
-	// Record history
-	config.DB.Create(&models.OrderStatusHistory{
-		OrderID:   order.ID,
-		Status:    "paid",
-		Notes:     "Simulated payment",
-		CreatedAt: time.Now(),
-	})
-
-	// Send Email
-	var tickets []models.Ticket
-	config.DB.Preload("Event").Preload("TicketType").Where("order_id = ?", order.ID).Find(&tickets)
-	utils.SendTicketEmail(order, tickets)
-
-	config.DB.Create(&models.OrderStatusHistory{
-		OrderID:   order.ID,
-		Status:    "paid",
-		Notes:     "E-Ticket email sent (Simulation)",
-		CreatedAt: time.Now(),
-	})
-
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Payment simulated successfully and email sent", "data": order})
-}
-
 // Payment Callback (Webhook)
 func PaymentCallback(c *gin.Context) {
 	// In real world, verify signature from Payment Gateway (Midtrans, Xendit, etc)
@@ -469,7 +432,7 @@ func PaymentCallback(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to update order status"})
 			return
 		}
-		if err := RestoreQuota(tx, order.ID); err != nil {
+		if err := utils.RestoreQuota(tx, order.ID); err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to restore quota"})
 			return
@@ -524,15 +487,14 @@ func UserCancelOrder(c *gin.Context) {
 
 	tx := config.DB.Begin()
 
-	order.Status = "cancelled"
-	if err := tx.Save(&order).Error; err != nil {
+	if err := tx.Model(&order).Update("status", "cancelled").Error; err != nil {
 		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to cancel order"})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to cancel order", "error": err.Error()})
 		return
 	}
 
 	// Restore Quota
-	if err := RestoreQuota(tx, order.ID); err != nil {
+	if err := utils.RestoreQuota(tx, order.ID); err != nil {
 		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to restore quota"})
 		return
@@ -547,6 +509,9 @@ func UserCancelOrder(c *gin.Context) {
 	})
 
 	tx.Commit()
+
+	// Send Cancellation Email
+	utils.SendOrderCancelledEmail(order, "Dibatalkan oleh pengguna")
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Order cancelled successfully", "data": order})
 }
@@ -599,10 +564,25 @@ func processPaymentGateway(order *models.Order, paymentMethod string, userID *ui
 		order.PaymentURL = fmt.Sprintf("https://simulator.kartcis.id/pay/%s", order.OrderNumber)
 		return
 	}
-
 	// 3. Retail Outlet (Alfamart/Indomaret)
 	if strings.Contains(paymentMethod, "Alfamart") || strings.Contains(paymentMethod, "Indomaret") {
 		// MOCK: Generate Payment Code
 		order.VirtualAccountNumber = fmt.Sprintf("ALFA-%d", time.Now().UnixNano()%100000000)
+		return
+	}
+
+	// 4. Bank Transfer (Jago)
+	if strings.Contains(paymentMethod, "BANK_TRANSFER_JAGO") {
+		// Set Payment Instruction
+		accNo := os.Getenv("JAGO_ACCOUNT_NUMBER")
+		accName := os.Getenv("JAGO_ACCOUNT_NAME")
+		if accNo == "" {
+			accNo = "1010101020" // Default Demo
+			accName = "Kartcis Demo Account"
+		}
+
+		order.VirtualAccountNumber = accNo
+		order.PaymentInstructions = fmt.Sprintf("Silakan transfer ke Bank Jago: %s a/n %s. Pastikan nominal sampai 3 digit terakhir (Rp %v) agar dapat diverifikasi otomatis.", accNo, accName, utils.FormatPrice(order.TotalAmount))
+		return
 	}
 }

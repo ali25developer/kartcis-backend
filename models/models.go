@@ -93,11 +93,13 @@ type Order struct {
 	CustomerPhone        string     `json:"customer_phone"`
 	TotalAmount          float64    `json:"total_amount"`
 	AdminFee             float64    `json:"admin_fee"`
+	UniqueCode           int        `json:"unique_code"`
 	Status               string     `json:"status"`
 	PaymentMethod        string     `json:"payment_method"`
 	VirtualAccountNumber string     `json:"virtual_account_number"`
 	PaymentURL           string     `json:"payment_url"`  // URL for E-Wallet redirect / QRIS
 	PaymentData          string     `json:"payment_data"` // JSON string for raw gateway response
+	PaymentInstructions  string     `json:"payment_instructions"`
 	PaidAt               *time.Time `json:"paid_at"`
 	ExpiresAt            *time.Time `json:"expires_at"`
 	CreatedAt            time.Time  `json:"created_at"`

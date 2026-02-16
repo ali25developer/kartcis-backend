@@ -37,6 +37,8 @@ type PaymentEmailData struct {
 	PaymentURL           string // For E-Wallet / Deep Link
 	ExpiryTime           string
 	CheckoutURL          string
+	PaymentInstructions  string
+	UniqueCode           int
 }
 
 type CustomFieldResponse struct {
@@ -47,6 +49,13 @@ type CustomFieldResponse struct {
 type ResetPasswordEmailData struct {
 	CustomerName string
 	ResetURL     string
+}
+
+type CancellationEmailData struct {
+	CustomerName string
+	OrderNumber  string
+	TotalAmount  string
+	Reason       string
 }
 
 func SendTicketEmail(order models.Order, tickets []models.Ticket) {
@@ -60,6 +69,10 @@ func SendTicketEmail(order models.Order, tickets []models.Ticket) {
 
 func SendPaymentInstructionEmail(order models.Order) {
 	go sendPaymentEmail(order)
+}
+
+func SendOrderCancelledEmail(order models.Order, reason string) {
+	go sendCancellationEmail(order, reason)
 }
 
 // For simplicity, we send one email per ticket or one email for the whole order?
@@ -178,12 +191,14 @@ func sendPaymentEmail(order models.Order) {
 	data := PaymentEmailData{
 		CustomerName:         order.CustomerName,
 		OrderNumber:          order.OrderNumber,
-		TotalAmount:          fmt.Sprintf("Rp %s", formatPrice(order.TotalAmount)),
+		TotalAmount:          fmt.Sprintf("Rp %s", FormatPrice(order.TotalAmount)),
 		PaymentMethod:        order.PaymentMethod,
 		VirtualAccountNumber: order.VirtualAccountNumber,
 		PaymentURL:           order.PaymentURL,
 		ExpiryTime:           expiryTime.Format("02 Jan 2006, 15:04"),
 		CheckoutURL:          fmt.Sprintf("%s/payment/%s", os.Getenv("FRONTEND_URL"), order.OrderNumber),
+		PaymentInstructions:  order.PaymentInstructions,
+		UniqueCode:           order.UniqueCode,
 	}
 
 	tmpl, err := template.New("payment").Parse(paymentHtmlTemplate)
@@ -215,7 +230,54 @@ func sendPaymentEmail(order models.Order) {
 	}
 }
 
-func formatPrice(price float64) string {
+func sendCancellationEmail(order models.Order, reason string) {
+	smtpHost := os.Getenv("SMTP_HOST")
+	smtpPort := os.Getenv("SMTP_PORT")
+	smtpUser := os.Getenv("SMTP_USER")
+	smtpPass := os.Getenv("SMTP_PASS")
+	from := os.Getenv("SMTP_FROM")
+
+	if smtpHost == "" || smtpUser == "" {
+		return
+	}
+
+	data := CancellationEmailData{
+		CustomerName: order.CustomerName,
+		OrderNumber:  order.OrderNumber,
+		TotalAmount:  fmt.Sprintf("Rp %s", FormatPrice(order.TotalAmount)),
+		Reason:       reason,
+	}
+
+	tmpl, err := template.New("cancellation").Parse(cancellationHtmlTemplate)
+	if err != nil {
+		log.Println("[Mailer] Cancellation Template Parse Error:", err)
+		return
+	}
+
+	var body bytes.Buffer
+	if err := tmpl.Execute(&body, data); err != nil {
+		log.Println("[Mailer] Cancellation Template Execute Error:", err)
+		return
+	}
+
+	auth := smtp.PlainAuth("", smtpUser, smtpPass, smtpHost)
+	to := []string{order.CustomerEmail}
+
+	subject := fmt.Sprintf("Pesanan Dibatalkan - %s", order.OrderNumber)
+	msg := []byte("From: " + from + "\r\n" +
+		"To: " + order.CustomerEmail + "\r\n" +
+		"Subject: " + subject + "\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: text/html; charset=UTF-8\r\n\r\n" +
+		body.String())
+
+	err = smtp.SendMail(smtpHost+":"+smtpPort, auth, from, to, msg)
+	if err != nil {
+		log.Println("[Mailer] SendMail Cancellation Error:", err)
+	}
+}
+
+func FormatPrice(price float64) string {
 	p := int64(price)
 	s := fmt.Sprintf("%d", p)
 	res := ""
@@ -273,7 +335,7 @@ const htmlTemplate = `
         body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, Arial, sans-serif; background-color: #f9fafb; margin: 0; padding: 0; }
         .wrapper { padding: 20px; }
         .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-        .header { background: linear-gradient(to right, #0284c7, #0369a1); padding: 32px 24px; text-align: left; color: #ffffff; }
+        .header { background: linear-gradient(to right, #b31356, #d61a6b); padding: 32px 24px; text-align: left; color: #ffffff; }
         .header h1 { margin: 0; font-size: 24px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
         .header p { margin: 8px 0 0; font-size: 15px; opacity: 0.95; line-height: 1.4; }
         .content { padding: 24px; }
@@ -283,7 +345,7 @@ const htmlTemplate = `
         .ticket-details { padding: 24px; }
         .event-title { font-size: 20px; font-weight: 700; color: #111827; margin: 0 0 12px; line-height: 1.2; }
         .badge { display: inline-block; padding: 4px 12px; border-radius: 99px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
-        .badge-sky { background-color: #f0f9ff; color: #0369a1; border: 1px solid #bae6fd; }
+        .badge-sky { background-color: #fff1f2; color: #b31356; border: 1px solid #fecdd3; }
         .info-grid { margin: 20px 0; border-top: 1px solid #f1f5f9; padding-top: 16px; }
         .info-item { display: flex; align-items: flex-start; font-size: 14px; color: #374151; margin-bottom: 12px; }
         .info-icon { margin-right: 12px; width: 18px; text-align: center; }
@@ -293,8 +355,8 @@ const htmlTemplate = `
         .footer-left { display: table-cell; width: 60%; vertical-align: middle; }
         .footer-right { display: table-cell; width: 40%; vertical-align: middle; text-align: right; }
         .code-label { font-size: 11px; color: #64748b; text-transform: uppercase; font-weight: 600; margin-bottom: 4px; }
-        .code-value { font-family: 'Courier New', monospace; font-size: 18px; font-weight: 700; color: #0284c7; }
-        .qr-section { background: #ffffff; padding: 40px 24px; text-align: center; border-top: 4px solid #0284c7; }
+        .code-value { font-family: 'Courier New', monospace; font-size: 18px; font-weight: 700; color: #b31356; }
+        .qr-section { background: #ffffff; padding: 40px 24px; text-align: center; border-top: 4px solid #ffd54c; }
         .qr-code-img { background: white; padding: 15px; border: 2px solid #f1f5f9; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom: 16px; }
         .legal-footer { text-align: center; padding: 32px 24px; font-size: 12px; color: #94a3b8; line-height: 1.6; }
     </style>
@@ -380,18 +442,18 @@ const paymentHtmlTemplate = `
         body { font-family: 'Inter', Arial, sans-serif; background-color: #f3f4f6; margin: 0; padding: 0; }
         .wrapper { padding: 20px; }
         .container { max-width: 500px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
-        .header { background-color: #0284c7; padding: 24px; text-align: center; color: #ffffff; }
+        .header { background-color: #b31356; padding: 24px; text-align: center; color: #ffffff; }
         .content { padding: 32px 24px; }
-        .amount-box { background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; text-align: center; margin-bottom: 24px; }
+        .amount-box { background-color: #fff1f2; border: 1px solid #fecdd3; border-radius: 8px; padding: 20px; text-align: center; margin-bottom: 24px; }
         .amount-label { font-size: 13px; color: #64748b; margin-bottom: 8px; }
-        .amount-value { font-size: 28px; font-weight: 800; color: #1e293b; }
+        .amount-value { font-size: 28px; font-weight: 800; color: #b31356; }
         .method-info { margin-bottom: 24px; border-bottom: 1px solid #f1f5f9; padding-bottom: 16px; }
         .label { font-size: 13px; color: #64748b; margin-bottom: 4px; }
         .value { font-size: 16px; font-weight: 600; color: #1e293b; }
-        .va-box { background-color: #f1f5f9; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 18px; color: #0284c7; letter-spacing: 1px; margin-top: 4px; }
-        .expiry-alert { background-color: #fff7ed; border: 1px solid #ffedd5; border-radius: 8px; padding: 16px; margin-top: 24px; }
-        .expiry-text { font-size: 14px; color: #9a3412; }
-        .btn { display: block; background-color: #0284c7; color: #ffffff !important; text-align: center; padding: 14px; border-radius: 8px; text-decoration: none; font-weight: 700; margin-top: 24px; }
+        .va-box { background-color: #f1f5f9; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 18px; color: #b31356; letter-spacing: 1px; margin-top: 4px; }
+        .expiry-alert { background-color: #fffbeb; border: 1px solid #fef3c7; border-radius: 8px; padding: 16px; margin-top: 24px; }
+        .expiry-text { font-size: 14px; color: #92400e; }
+        .btn { display: block; background-color: #b31356; color: #ffffff !important; text-align: center; padding: 14px; border-radius: 8px; text-decoration: none; font-weight: 700; margin-top: 24px; border-bottom: 4px solid #ffd54c; }
         .footer { text-align: center; padding: 24px; font-size: 12px; color: #94a3b8; }
     </style>
 </head>
@@ -417,8 +479,15 @@ const paymentHtmlTemplate = `
 
                 {{if .VirtualAccountNumber}}
                 <div class="method-info">
-                    <div class="label">Nomor Virtual Account</div>
+                    <div class="label">Nomor Rekening / Virtual Account</div>
                     <div class="va-box">{{.VirtualAccountNumber}}</div>
+                </div>
+                {{end}}
+
+                {{if .PaymentInstructions}}
+                <div class="method-info">
+                    <div class="label">Instruksi Pembayaran</div>
+                    <div class="value" style="font-size: 14px; font-weight: 400; color: #475569; line-height: 1.5;">{{.PaymentInstructions}}</div>
                 </div>
                 {{end}}
 
@@ -518,7 +587,7 @@ const passwordResetHtmlTemplate = `
         .container { max-width: 500px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); padding: 40px; text-align: center; }
         h2 { color: #1e293b; margin-top: 0; }
         p { color: #64748b; font-size: 16px; line-height: 1.5; margin-bottom: 24px; }
-        .btn { display: inline-block; background-color: #0284c7; color: #ffffff !important; padding: 14px 24px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 16px; }
+        .btn { display: inline-block; background-color: #b31356; color: #ffffff !important; padding: 14px 24px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 16px; border-bottom: 3px solid #ffd54c; }
         .footer { margin-top: 32px; font-size: 12px; color: #94a3b8; }
     </style>
 </head>
@@ -534,6 +603,59 @@ const passwordResetHtmlTemplate = `
         </div>
         <div class="footer">
             &copy; 2026 Kartcis.ID
+        </div>
+    </div>
+</body>
+</html>
+`
+
+const cancellationHtmlTemplate = `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pesanan Dibatalkan - Kartcis.ID</title>
+    <style>
+        body { font-family: 'Inter', Arial, sans-serif; background-color: #f3f4f6; margin: 0; padding: 0; }
+        .wrapper { padding: 40px 20px; }
+        .container { max-width: 500px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); overflow: hidden; }
+        .header { background-color: #1e293b; padding: 24px; text-align: center; color: #ffffff; }
+        .content { padding: 32px 24px; text-align: center; }
+        h2 { color: #e11d48; margin-top: 0; }
+        p { color: #64748b; font-size: 16px; line-height: 1.5; margin-bottom: 24px; }
+        .order-info { background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 24px; text-align: left; }
+        .label { font-size: 13px; color: #64748b; }
+        .value { font-size: 15px; font-weight: 600; color: #1e293b; }
+        .footer { text-align: center; padding: 24px; font-size: 12px; color: #94a3b8; }
+    </style>
+</head>
+<body>
+    <div class="wrapper">
+        <div class="container">
+            <div class="header">
+                <h3 style="margin:0">Kartcis.ID</h3>
+            </div>
+            <div class="content">
+                <h2>Pesanan Dibatalkan</h2>
+                <p>Halo <b>{{.CustomerName}}</b>,<br>Pesanan Anda <b>#{{.OrderNumber}}</b> telah dibatalkan.</p>
+                
+                <div class="order-info">
+                    <div style="margin-bottom: 12px;">
+                        <span class="label">Alasan Pembatalan:</span><br>
+                        <span class="value">{{.Reason}}</span>
+                    </div>
+                    <div>
+                        <span class="label">Total Nominal:</span><br>
+                        <span class="value">{{.TotalAmount}}</span>
+                    </div>
+                </div>
+
+                <p style="font-size: 14px;">Jika Anda merasa ini adalah kesalahan atau sudah melakukan pembayaran, silakan hubungi tim support kami dengan melampirkan bukti transfer.</p>
+            </div>
+            <div class="footer">
+                &copy; 2026 Kartcis.ID. Seluruh hak cipta dilindungi.
+            </div>
         </div>
     </div>
 </body>

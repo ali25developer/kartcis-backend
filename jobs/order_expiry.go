@@ -3,8 +3,8 @@ package jobs
 import (
 	"fmt"
 	"kartcis-backend/config"
-	"kartcis-backend/controllers"
 	"kartcis-backend/models"
+	"kartcis-backend/utils"
 	"time"
 
 	"gorm.io/gorm"
@@ -49,7 +49,7 @@ func expireOrders() {
 			}
 
 			// 2. Restore Quota
-			if err := controllers.RestoreQuota(tx, order.ID); err != nil {
+			if err := utils.RestoreQuota(tx, order.ID); err != nil {
 				return err
 			}
 
