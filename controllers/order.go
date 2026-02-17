@@ -13,8 +13,6 @@ import (
 	"kartcis-backend/utils"
 	"strings"
 
-	"math/rand"
-
 	"github.com/gin-gonic/gin"
 )
 
@@ -167,25 +165,41 @@ func CreateOrder(c *gin.Context) {
 	var uniqueCode int
 	if strings.HasPrefix(req.PaymentMethod, "BANK_TRANSFER_") || req.PaymentMethod == "MANUAL_JAGO" {
 		// Generate unique code and ensure TOTAL AMOUNT is unique for pending orders
-		rand.Seed(time.Now().UnixNano())
 		baseAmount := totalAmount + totalAdminFee
 
-		for i := 0; i < 10; i++ { // Try up to 10 times to find a unique total amount
-			code := rand.Intn(899) + 101
-			checkTotal := baseAmount + float64(code)
+		// 1. Get ALL currently used codes for this amount
+		var usedCodes []int
+		// We query just the UniqueCode column for pending orders where (TotalAmount - UniqueCode) is approx BaseAmount
+		// To be safe and DB agnostic about float precision logic, we can query by range or just select unique_code
+		// where status='pending' AND ABS(total_amount - unique_code - baseAmount) < 1.0
 
-			var existing int64
-			tx.Model(&models.Order{}).Where("status = ? AND total_amount = ?", "pending", checkTotal).Count(&existing)
+		tx.Model(&models.Order{}).
+			Where("status = ? AND total_amount >= ? AND total_amount <= ?", "pending", baseAmount+101, baseAmount+999).
+			Pluck("unique_code", &usedCodes)
 
-			if existing == 0 {
+		// 2. Check Capacity
+		if len(usedCodes) >= 899 {
+			tx.Rollback()
+			c.JSON(http.StatusTooManyRequests, gin.H{
+				"success": false,
+				"message": "Maaf, sistem pembayaran untuk nominal ini sedang sangat penuh. Mohon coba 15-30 menit lagi.",
+			})
+			return
+		}
+
+		// 3. Find First Available Slot (Linear Search)
+		// Map for O(1) lookup
+		usedMap := make(map[int]bool)
+		for _, code := range usedCodes {
+			usedMap[code] = true
+		}
+
+		// Search 101 to 999
+		for code := 101; code <= 999; code++ {
+			if !usedMap[code] {
 				uniqueCode = code
 				break
 			}
-		}
-
-		// Fallback (extremely unlikely to fail 10 times in a row unless massive traffic)
-		if uniqueCode == 0 {
-			uniqueCode = rand.Intn(899) + 101
 		}
 	}
 
