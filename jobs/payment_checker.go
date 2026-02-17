@@ -18,8 +18,8 @@ import (
 )
 
 func StartPaymentCheckerJob() {
-	// Run every 2 minutes
-	ticker := time.NewTicker(2 * time.Minute)
+	// Run every 1 minute
+	ticker := time.NewTicker(1 * time.Minute)
 	go func() {
 		for range ticker.C {
 			CheckBankJagoEmails()
