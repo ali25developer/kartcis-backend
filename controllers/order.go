@@ -91,6 +91,12 @@ func CreateOrder(c *gin.Context) {
 			return
 		}
 
+		if ticketType.Event.Status == "cancelled" {
+			tx.Rollback()
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Maaf, event ini telah dibatalkan."})
+			return
+		}
+
 		if ticketType.Event.Status != "published" {
 			tx.Rollback()
 			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Maaf, event ini sudah berakhir atau tidak tersedia."})
