@@ -314,6 +314,32 @@ func UpdateEvent(c *gin.Context) {
 		return
 	}
 
+	// SMART STATUS ADJUSTMENT based on Date Change
+	// We only auto-adjust if the current status is either 'published' or 'completed'
+	currentStatus := event.Status
+	if req.Status != "" {
+		currentStatus = req.Status
+	}
+
+	if currentStatus == "published" || currentStatus == "completed" {
+		targetDate := event.EventDate
+		if req.EventDate != "" {
+			parsedDate, _ := parseEventDate(req.EventDate)
+			targetDate = parsedDate
+		}
+
+		newStatus := currentStatus
+		if targetDate.Before(time.Now()) {
+			newStatus = "completed"
+		} else {
+			newStatus = "published"
+		}
+
+		if newStatus != currentStatus {
+			tx.Model(&event).Update("status", newStatus)
+		}
+	}
+
 	// Handle Ticket Types Sync if provided
 	if req.TicketTypes != nil {
 		newTTs := *req.TicketTypes
