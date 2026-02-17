@@ -16,6 +16,7 @@ func SetupRouter() *gin.Engine {
 
 	// Middleware
 	r.Use(middleware.CORSMiddleware())
+	r.Use(middleware.SmartLogger()) // Added Smart Logging
 
 	// Root Handler
 	r.GET("/", func(c *gin.Context) {

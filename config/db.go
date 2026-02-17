@@ -45,6 +45,7 @@ func ConnectDB() {
 		&models.OrderStatusHistory{},
 		&models.PasswordReset{},
 		&models.SiteSetting{}, // Added
+		&models.RequestLog{},  // Added for smart logging
 	)
 	if err != nil {
 		log.Println("Migration failed:", err)

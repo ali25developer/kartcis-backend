@@ -154,6 +154,18 @@ type OrderStatusHistory struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type RequestLog struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	UserID    *uint     `json:"user_id"` // Nullable
+	Method    string    `json:"method"`
+	Path      string    `json:"path"`
+	Status    int       `json:"status"`
+	Latency   int64     `json:"latency"` // in milliseconds:w
+	IPAddress string    `json:"ip_address"`
+	UserAgent string    `json:"user_agent"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type PasswordReset struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
 	Email     string    `json:"email" gorm:"index"`
