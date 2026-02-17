@@ -43,7 +43,8 @@ func ConnectDB() {
 		&models.Ticket{},
 		&models.SocialAccount{},
 		&models.OrderStatusHistory{},
-		&models.PasswordReset{}, // Added
+		&models.PasswordReset{},
+		&models.SiteSetting{}, // Added
 	)
 	if err != nil {
 		log.Println("Migration failed:", err)
@@ -65,5 +66,27 @@ func ConnectDB() {
 	// Ensure history table exists just in case
 	if !DB.Migrator().HasTable(&models.OrderStatusHistory{}) {
 		DB.Migrator().CreateTable(&models.OrderStatusHistory{})
+	}
+
+	seedSettings(DB)
+}
+
+func seedSettings(db *gorm.DB) {
+	defaults := []models.SiteSetting{
+		{Key: "contact_email", Value: "support@kartcis.id"},
+		{Key: "contact_phone", Value: "+628123456789"},
+		{Key: "contact_address", Value: "Jl. Kaliurang Km 14, Yogyakarta"},
+		{Key: "facebook_url", Value: "https://facebook.com/kartcis"},
+		{Key: "twitter_url", Value: "https://twitter.com/kartcis"},
+		{Key: "instagram_url", Value: "https://instagram.com/kartcis"},
+	}
+
+	for _, s := range defaults {
+		var existing models.SiteSetting
+		if err := db.Where("key = ?", s.Key).First(&existing).Error; err != nil {
+			// Not found, create
+			db.Create(&s)
+			log.Println("Seeded setting:", s.Key)
+		}
 	}
 }

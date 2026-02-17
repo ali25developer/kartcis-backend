@@ -170,7 +170,13 @@ func SetupRouter() *gin.Engine {
 
 		// Upload
 		admin.POST("/upload", controllers.UploadFile)
+
+		// Site Settings
+		admin.PUT("/settings", controllers.UpdateSettings)
 	}
+
+	// Public Settings
+	v1.GET("/settings", controllers.GetSettings)
 
 	return r
 }
