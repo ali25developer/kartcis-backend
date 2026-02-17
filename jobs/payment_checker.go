@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"fmt"
 	"io"
 	"kartcis-backend/config"
 	"kartcis-backend/models"
@@ -22,12 +23,12 @@ func StartPaymentCheckerJob() {
 	ticker := time.NewTicker(1 * time.Minute)
 	go func() {
 		for range ticker.C {
-			CheckBankJagoEmails()
+			CheckBankJagoEmails("Auto")
 		}
 	}()
 }
 
-func CheckBankJagoEmails() {
+func CheckBankJagoEmails(source string) {
 	host := os.Getenv("IMAP_HOST")
 	port := os.Getenv("IMAP_PORT")
 	user := os.Getenv("IMAP_USER")
@@ -41,21 +42,21 @@ func CheckBankJagoEmails() {
 	// Connect to server
 	c, err := client.DialTLS(host+":"+port, nil)
 	if err != nil {
-		log.Println("[PaymentJob] Dial error:", err)
+		log.Printf("[%s-PaymentJob] Dial error: %v\n", source, err)
 		return
 	}
 	defer c.Logout()
 
 	// Login
 	if err := c.Login(user, pass); err != nil {
-		log.Println("[PaymentJob] Login error:", err)
+		log.Printf("[%s-PaymentJob] Login error: %v\n", source, err)
 		return
 	}
 
 	// Select INBOX
 	mbox, err := c.Select("INBOX", false)
 	if err != nil {
-		log.Println("[PaymentJob] Select error:", err)
+		log.Printf("[%s-PaymentJob] Select error: %v\n", source, err)
 		return
 	}
 
@@ -68,9 +69,9 @@ func CheckBankJagoEmails() {
 	// Broaden to anything from jago.com to handle no-reply or noreply
 	criteria.Header.Set("From", "jago.com")
 
-	log.Println("[PaymentJob] Checking for new emails (Manual/Auto)...")
+	log.Printf("[%s-PaymentJob] Checking for new emails...", source)
 	ids, err := c.Search(criteria)
-	log.Printf("[PaymentJob] Found %d matching emails in last 24h\n", len(ids))
+	log.Printf("[%s-PaymentJob] Found %d matching emails in last 24h\n", source, len(ids))
 	if err != nil {
 		log.Println("[PaymentJob] Search error:", err)
 		return
@@ -94,7 +95,7 @@ func CheckBankJagoEmails() {
 	}()
 
 	for msg := range messages {
-		log.Printf("[PaymentJob] Processing Email Subject: %s\n", msg.Envelope.Subject)
+		log.Printf("[%s-PaymentJob] Processing Email Subject: %s\n", source, msg.Envelope.Subject)
 		r := msg.GetBody(&section)
 		if r == nil {
 			continue
@@ -127,16 +128,16 @@ func CheckBankJagoEmails() {
 		}
 
 		if body != "" {
-			processJagoEmail(body)
+			processJagoEmail(body, source)
 		}
 	}
 
 	if err := <-done; err != nil {
-		log.Println("[PaymentJob] Fetch error:", err)
+		log.Printf("[%s-PaymentJob] Fetch error: %v\n", source, err)
 	}
 }
 
-func processJagoEmail(body string) {
+func processJagoEmail(body string, source string) {
 	// Sample Jago Body: "Kamu dapet transferan nih! ... Nominal: Rp 50.412 ... Pengirim: JOHN DOE"
 	// Regex to find Amount
 	re := regexp.MustCompile(`Rp\s?([0-9.]+)`)
@@ -151,7 +152,7 @@ func processJagoEmail(body string) {
 		return
 	}
 
-	log.Printf("[PaymentJob] Found Jago Transfer: Rp %v\n", amount)
+	log.Printf("[%s-PaymentJob] Found Jago Transfer: Rp %v\n", source, amount)
 
 	// Search for pending order with this exact amount
 	// Search for matching order
@@ -171,12 +172,12 @@ func processJagoEmail(body string) {
 			// Still not found even in history -> Give up
 			return
 		}
-		log.Printf("[PaymentJob] Found matching CANCELLED/EXPIRED order: %s. Reviving...", order.OrderNumber)
+		log.Printf("[%s-PaymentJob] Found matching CANCELLED/EXPIRED order: %s. Reviving...", source, order.OrderNumber)
 	}
 
 	// Double check if it's a Bank Transfer Jago payment
 	if !strings.Contains(order.PaymentMethod, "BANK_TRANSFER_JAGO") && order.PaymentMethod != "MANUAL_JAGO" {
-		log.Printf("[PaymentJob] Ignored order %s. Payment Method is %s (Not Jago)\n", order.OrderNumber, order.PaymentMethod)
+		log.Printf("[%s-PaymentJob] Ignored order %s. Payment Method is %s (Not Jago)\n", source, order.OrderNumber, order.PaymentMethod)
 		return
 	}
 
@@ -194,13 +195,13 @@ func processJagoEmail(body string) {
 	tx.Create(&models.OrderStatusHistory{
 		OrderID:   order.ID,
 		Status:    "paid",
-		Notes:     "Verified automatically via Bank Jago Email",
+		Notes:     fmt.Sprintf("Verified %s via Bank Jago Email", source),
 		CreatedAt: now,
 	})
 
 	tx.Commit()
 
-	log.Printf("[PaymentJob] Order %s marked as PAID via Email Verification\n", order.OrderNumber)
+	log.Printf("[%s-PaymentJob] Order %s marked as PAID via Email Verification\n", source, order.OrderNumber)
 
 	// Send Ticket
 	var tickets []models.Ticket

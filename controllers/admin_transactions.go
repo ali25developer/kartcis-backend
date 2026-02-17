@@ -343,7 +343,7 @@ func UpdateTransactionStatus(c *gin.Context) {
 
 func AdminTriggerScraping(c *gin.Context) {
 	// Trigger the background job logic immediately
-	go jobs.CheckBankJagoEmails()
+	go jobs.CheckBankJagoEmails("Manual")
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
