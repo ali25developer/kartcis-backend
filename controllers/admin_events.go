@@ -286,9 +286,6 @@ func UpdateEvent(c *gin.Context) {
 	if req.FeePercentage != 0 {
 		updates["fee_percentage"] = req.FeePercentage
 	}
-	if req.FeePercentage != 0 {
-		updates["fee_percentage"] = req.FeePercentage
-	}
 	if req.CustomFields != "" {
 		updates["custom_fields"] = req.CustomFields
 	}
@@ -378,22 +375,47 @@ func UpdateEvent(c *gin.Context) {
 			tt.EventID = event.ID
 			if tt.ID == 0 {
 				// New
-				if tt.Available == 0 {
-					tt.Available = tt.Quota
-				}
+				tt.Available = tt.Quota
 				if err := tx.Create(&tt).Error; err != nil {
 					tx.Rollback()
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to create new ticket type"})
 					return
 				}
 			} else {
-				// Update
-				if err := tx.Model(&models.TicketType{}).Where("id = ? AND event_id = ?", tt.ID, event.ID).Updates(tt).Error; err != nil {
+				// Update existing: Adjust 'Available' based on change in 'Quota'
+				var oldTT models.TicketType
+				if err := tx.First(&oldTT, tt.ID).Error; err == nil {
+					diff := tt.Quota - oldTT.Quota
+					if diff != 0 {
+						tt.Available = oldTT.Available + diff
+						if tt.Available < 0 {
+							tt.Available = 0
+						}
+					} else {
+						// Keep current availability if quota didn't change
+						tt.Available = oldTT.Available
+					}
+				}
+
+				if err := tx.Model(&models.TicketType{}).Where("id = ? AND event_id = ?", tt.ID, event.ID).
+					Select("Name", "Description", "Price", "OriginalPrice", "Quota", "Available").
+					Updates(tt).Error; err != nil {
 					tx.Rollback()
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to update ticket type"})
 					return
 				}
 			}
+		}
+
+		// 3. Final Sync for Event Totals (MinPrice, MaxPrice, Total Quota)
+		if err := tx.Model(&event).Updates(map[string]interface{}{
+			"min_price": updates["min_price"],
+			"max_price": updates["max_price"],
+			"quota":     updates["quota"],
+		}).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to update event totals"})
+			return
 		}
 	}
 
