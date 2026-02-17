@@ -27,7 +27,8 @@ func GetEvents(c *gin.Context) {
 	query := config.DB.Model(&models.Event{}).Preload("Category").Preload("TicketTypes")
 
 	// Filters
-	query = query.Where("status = ?", "published") // Public API only shows published
+	// Public API shows everything EXCEPT draft
+	query = query.Where("status IN ?", []string{"published", "completed", "cancelled", "sold_out"})
 
 	if search != "" {
 		query = query.Where("title ILIKE ? OR description ILIKE ?", "%"+search+"%", "%"+search+"%")
@@ -107,7 +108,7 @@ func GetUpcomingEvents(c *gin.Context) {
 
 	if err := config.DB.Model(&models.Event{}).
 		Preload("Category").Preload("TicketTypes").
-		Where("status = ? AND event_date >= ?", "published", time.Now()).
+		Where("status IN ? AND event_date >= ?", []string{"published", "sold_out"}, time.Now()).
 		Order("event_date ASC").
 		Limit(limit).
 		Find(&events).Error; err != nil {
@@ -128,7 +129,7 @@ func GetPopularEvents(c *gin.Context) {
 	if err := config.DB.Table("events").
 		Select("events.*, COUNT(tickets.id) as sales_count").
 		Joins("LEFT JOIN tickets ON tickets.event_id = events.id AND tickets.status IN (?)", []string{"active", "used"}).
-		Where("events.status = ?", "published").
+		Where("events.status IN ?", []string{"published", "sold_out", "completed"}).
 		Group("events.id").
 		Order("sales_count DESC").
 		Limit(limit).
@@ -148,7 +149,7 @@ func GetFeaturedEvents(c *gin.Context) {
 
 	if err := config.DB.Model(&models.Event{}).
 		Preload("Category").Preload("TicketTypes").
-		Where("status = ? AND is_featured = ?", "published", true).
+		Where("status IN ? AND is_featured = ?", []string{"published", "sold_out"}, true).
 		Order("event_date ASC").
 		Limit(limit).
 		Find(&events).Error; err != nil {
@@ -162,9 +163,9 @@ func GetFeaturedEvents(c *gin.Context) {
 // GetCities
 func GetCities(c *gin.Context) {
 	cities := []string{}
-	// Get distinct cities from published events
+	// Get distinct cities from visible events
 	if err := config.DB.Model(&models.Event{}).
-		Where("status = ?", "published").
+		Where("status IN ?", []string{"published", "completed", "cancelled", "sold_out"}).
 		Distinct("city").
 		Pluck("city", &cities).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to fetch cities"})
@@ -179,7 +180,7 @@ func GetCities(c *gin.Context) {
 	response := []CityResponse{}
 	for _, cityName := range cities {
 		var count int64
-		config.DB.Model(&models.Event{}).Where("status = ? AND city = ?", "published", cityName).Count(&count)
+		config.DB.Model(&models.Event{}).Where("status IN ? AND city = ?", []string{"published", "completed", "cancelled", "sold_out"}, cityName).Count(&count)
 		response = append(response, CityResponse{Name: cityName, Count: count})
 	}
 
