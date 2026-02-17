@@ -28,6 +28,7 @@ func GetEvents(c *gin.Context) {
 
 	// Filters
 	// Public API shows everything EXCEPT draft
+	// Show All Events by Default (Upcoming + Past)
 	query = query.Where("status IN ?", []string{"published", "completed", "cancelled", "sold_out"})
 
 	if search != "" {
@@ -52,8 +53,31 @@ func GetEvents(c *gin.Context) {
 	// Count Total
 	query.Count(&totalItems)
 
+	// Sorting
+	sort := c.Query("sort")
+	switch sort {
+	case "newest":
+		query = query.Order("created_at DESC")
+	case "oldest":
+		query = query.Order("created_at ASC")
+	case "date_desc":
+		query = query.Order("event_date DESC")
+	case "date_asc":
+		query = query.Order("event_date ASC")
+	case "price_asc":
+		query = query.Order("min_price ASC")
+	case "price_desc":
+		query = query.Order("min_price DESC")
+	default:
+		// Smart Sort: Upcoming First (ASC), then Past (DESC)
+		// 1. Upcoming (>= Today) -> Priority 0
+		// 2. Past (< Today) -> Priority 1
+		// 3. Within groups: Upcoming by Date ASC, Past by Date DESC
+		query = query.Order("CASE WHEN event_date >= CURRENT_DATE THEN 0 ELSE 1 END ASC, CASE WHEN event_date >= CURRENT_DATE THEN event_date END ASC, CASE WHEN event_date < CURRENT_DATE THEN event_date END DESC")
+	}
+
 	// Fetch Data
-	query.Limit(limit).Offset(offset).Order("event_date ASC").Find(&events)
+	query.Limit(limit).Offset(offset).Find(&events)
 
 	// Pagination
 	totalPages := int(totalItems) / limit

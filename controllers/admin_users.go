@@ -102,7 +102,12 @@ func AdminUpdateUser(c *gin.Context) {
 		return
 	}
 
-	var input models.User
+	var input struct {
+		Name      string   `json:"name"`
+		Email     string   `json:"email"`
+		Role      string   `json:"role"`
+		CustomFee *float64 `json:"custom_fee"` // Can be null
+	}
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid input"})
 		return
@@ -111,6 +116,13 @@ func AdminUpdateUser(c *gin.Context) {
 	user.Name = input.Name
 	user.Email = input.Email
 	user.Role = input.Role
+
+	// Logic: CustomFee only valid if Role is 'organizer'
+	if user.Role == "organizer" {
+		user.CustomFee = input.CustomFee
+	} else {
+		user.CustomFee = nil // Force null for other roles
+	}
 	// Skip password update here unless specific logic
 
 	config.DB.Save(&user)

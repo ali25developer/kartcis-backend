@@ -24,20 +24,30 @@ func AdminGetTransactions(c *gin.Context) {
 	query := config.DB.Model(&models.Order{})
 	status := c.Query("status")
 	if status != "" {
-		query = query.Where("status = ?", status)
+		query = query.Where("orders.status = ?", status)
 	}
 
 	// Search filter
+	// Filters
+	role, _ := c.Get("userRole")
+	if role == "organizer" {
+		userID, _ := c.Get("userID")
+		query = query.Joins("JOIN tickets ON tickets.order_id = orders.id").
+			Joins("JOIN events ON events.id = tickets.event_id").
+			Where("events.organizer_id = ?", userID).
+			Group("orders.id")
+	}
+
 	search := c.Query("search")
 	if search != "" {
-		query = query.Where("order_number ILIKE ? OR customer_email ILIKE ?", "%"+search+"%", "%"+search+"%")
+		query = query.Where("orders.order_number ILIKE ? OR orders.customer_email ILIKE ?", "%"+search+"%", "%"+search+"%")
 	}
 
 	// Count Total
 	query.Count(&totalItems)
 
 	// Fetch Data
-	query.Preload("Tickets.Event").Preload("Tickets.TicketType").Order("created_at desc").Limit(limit).Offset(offset).Find(&orders)
+	query.Preload("Tickets.Event").Preload("Tickets.TicketType").Order("orders.created_at desc").Limit(limit).Offset(offset).Find(&orders)
 
 	totalPages := int(totalItems) / limit
 	if int(totalItems)%limit != 0 {
@@ -231,17 +241,94 @@ func GetRevenueSummary(c *gin.Context) {
 		Total float64
 	}
 	var result Result
-	config.DB.Model(&models.Order{}).Where("status = ?", "paid").Select("sum(total_amount) as total").Scan(&result)
+
+	role, _ := c.Get("userRole")
+	userID, _ := c.Get("userID")
+
+	baseQuery := config.DB.Model(&models.Order{}).Where("orders.status = ?", "paid")
+
+	if role == "organizer" {
+		baseQuery = baseQuery.Joins("JOIN tickets ON tickets.order_id = orders.id").
+			Joins("JOIN events ON events.id = tickets.event_id").
+			Where("events.organizer_id = ?", userID).
+			Group("orders.id")
+	}
+
+	// For total revenue, we need to be careful with Group/Sum.
+	// If grouped, Scan(&result) might return multiple rows.
+	// Easier to Sum in Go or subquery?
+	// Or use Distinct Order ID sum?
+	// Since one order can have multiple tickets, joining tickets multiplies rows.
+	// But we filter by organizer. If an order has 2 tickets from same organizer, it will duplicate order rows in join.
+	// Wait, if an order has 2 tickets, Join produces 2 rows.
+	// Sum(total_amount) will double count!
+	// The `total_amount` is on Order level.
+	// If we filter by organizer, we should only sum the price of TICKETS that belong to this organizer?
+	// OR does the organizer get the full order amount?
+	// Usually, revenue share is complex.
+	// If an order has Ticket A (Org 1) and Ticket B (Org 2).
+	// Org 1 should only see Ticket A's price.
+
+	// RE-THINKING REVENUE FOR ORGANIZER:
+	// If I am Organizer, my revenue is SUM(ticket_price) of tickets I own that are PAID.
+	// Not Order.TotalAmount.
+
+	if role == "organizer" {
+		// Organizer Revenue = Sum of Ticket Prices for their events in Paid Orders
+		config.DB.Table("tickets").
+			Joins("JOIN orders ON orders.id = tickets.order_id").
+			Joins("JOIN ticket_types ON ticket_types.id = tickets.ticket_type_id").
+			Joins("JOIN events ON events.id = tickets.event_id").
+			Where("orders.status = ? AND events.organizer_id = ?", "paid", userID).
+			Select("COALESCE(SUM(ticket_types.price - (ticket_types.price * events.fee_percentage / 100)), 0) as total").
+			Scan(&result)
+		total = result.Total
+
+		// Today
+		today := time.Now().Truncate(24 * time.Hour)
+		config.DB.Table("tickets").
+			Joins("JOIN orders ON orders.id = tickets.order_id").
+			Joins("JOIN ticket_types ON ticket_types.id = tickets.ticket_type_id").
+			Joins("JOIN events ON events.id = tickets.event_id").
+			Where("orders.status = ? AND events.organizer_id = ? AND orders.created_at >= ?", "paid", userID, today).
+			Select("COALESCE(SUM(ticket_types.price - (ticket_types.price * events.fee_percentage / 100)), 0) as total").
+			Scan(&result)
+		var todayRev float64 = result.Total
+
+		// Yesterday
+		yesterday := today.AddDate(0, 0, -1)
+		config.DB.Table("tickets").
+			Joins("JOIN orders ON orders.id = tickets.order_id").
+			Joins("JOIN ticket_types ON ticket_types.id = tickets.ticket_type_id").
+			Joins("JOIN events ON events.id = tickets.event_id").
+			Where("orders.status = ? AND events.organizer_id = ? AND orders.created_at >= ? AND orders.created_at < ?", "paid", userID, yesterday, today).
+			Select("COALESCE(SUM(ticket_types.price - (ticket_types.price * events.fee_percentage / 100)), 0) as total").
+			Scan(&result)
+		var yesterdayRev float64 = result.Total
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data": gin.H{
+				"total_revenue":     total,
+				"today_revenue":     todayRev,
+				"yesterday_revenue": yesterdayRev,
+			},
+		})
+		return
+	}
+
+	// ADMIN (Global Revenue)
+	config.DB.Model(&models.Order{}).Where("status = ?", "paid").Select("COALESCE(SUM(total_amount), 0) as total").Scan(&result)
 	total = result.Total
 
 	// Yesterday vs Today
 	today := time.Now().Truncate(24 * time.Hour)
 	var todayRev, yesterdayRev float64
-	config.DB.Model(&models.Order{}).Where("status = ? AND created_at >= ?", "paid", today).Select("sum(total_amount) as total").Scan(&result)
+	config.DB.Model(&models.Order{}).Where("status = ? AND created_at >= ?", "paid", today).Select("COALESCE(SUM(total_amount), 0) as total").Scan(&result)
 	todayRev = result.Total
 
 	yesterday := today.AddDate(0, 0, -1)
-	config.DB.Model(&models.Order{}).Where("status = ? AND created_at >= ? AND created_at < ?", "paid", yesterday, today).Select("sum(total_amount) as total").Scan(&result)
+	config.DB.Model(&models.Order{}).Where("status = ? AND created_at >= ? AND created_at < ?", "paid", yesterday, today).Select("COALESCE(SUM(total_amount), 0) as total").Scan(&result)
 	yesterdayRev = result.Total
 
 	c.JSON(http.StatusOK, gin.H{

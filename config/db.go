@@ -64,9 +64,30 @@ func ConnectDB() {
 	if !DB.Migrator().HasColumn(&models.Order{}, "payment_instructions") {
 		DB.Migrator().AddColumn(&models.Order{}, "payment_instructions")
 	}
-	// Ensure history table exists just in case
+
+	// Manual Migration for Multi-Role Features
+	if !DB.Migrator().HasColumn(&models.Event{}, "organizer_id") {
+		DB.Migrator().AddColumn(&models.Event{}, "organizer_id")
+	}
+	if !DB.Migrator().HasColumn(&models.Event{}, "fee_percentage") {
+		DB.Migrator().AddColumn(&models.Event{}, "fee_percentage")
+	}
+	if !DB.Migrator().HasColumn(&models.Event{}, "custom_fields") {
+		DB.Migrator().AddColumn(&models.Event{}, "custom_fields")
+	}
+	if !DB.Migrator().HasColumn(&models.User{}, "role") {
+		DB.Migrator().AddColumn(&models.User{}, "role")
+	}
+	if !DB.Migrator().HasColumn(&models.User{}, "custom_fee") {
+		DB.Migrator().AddColumn(&models.User{}, "custom_fee")
+	}
+
+	// Ensure new tables exists just in case
 	if !DB.Migrator().HasTable(&models.OrderStatusHistory{}) {
 		DB.Migrator().CreateTable(&models.OrderStatusHistory{})
+	}
+	if !DB.Migrator().HasTable(&models.RequestLog{}) {
+		DB.Migrator().CreateTable(&models.RequestLog{})
 	}
 
 	seedSettings(DB)

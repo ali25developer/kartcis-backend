@@ -98,33 +98,20 @@ func SetupRouter() *gin.Engine {
 		// Let's assume PayOrder uses ID.
 	}
 
-	// Admin
+	// Admin & Organizer Shared Routes
 	admin := v1.Group("/admin")
-	admin.Use(middleware.AuthMiddleware(), requireAdmin())
+	admin.Use(middleware.AuthMiddleware(), requireAdminOrOrganizer())
 	{
-		// Admin Categories
-		admin.GET("/categories", controllers.AdminGetCategories)
-		admin.POST("/categories", controllers.CreateCategory)
-		admin.GET("/categories/:id", controllers.AdminGetCategoryDetail)
-		admin.PUT("/categories/:id", controllers.UpdateCategory)
-		admin.DELETE("/categories/:id", controllers.DeleteCategory)
-		admin.PATCH("/categories/:id/status", controllers.UpdateCategoryStatus)
-		admin.PUT("/categories/reorder", controllers.ReorderCategories)
-
-		// Admin Events
+		// Events (Scoped)
 		admin.GET("/events", controllers.AdminGetEvents)
 		admin.POST("/events", controllers.CreateEvent)
-		admin.GET("/events/:id", controllers.GetEventDetail) // Can reuse public detail or simpler admin detail? Spec implies separate.
-		// Let's use GetEventDetail (public) if it's sufficient, or create AdminGetEventDetail if logic differs (e.g. show hidden fields).
-		// `controllers/admin_events.go` does not currently have AdminGetEventDetail explicitly, using public logic or default?
-		// Wait, I didn't add AdminGetEventDetail to admin_events.go.
-		// Ideally we reuse the public one if it shows enough.
+		admin.GET("/events/:id", controllers.GetEventDetail)
 		admin.PUT("/events/:id", controllers.UpdateEvent)
 		admin.DELETE("/events/:id", controllers.DeleteEvent)
 		admin.PATCH("/events/:id/status", controllers.UpdateEventStatus)
 		admin.GET("/events/:id/analytics", controllers.GetEventAnalytics)
 
-		// Admin Ticket Types
+		// Ticket Types (Scoped)
 		admin.GET("/ticket-types", controllers.AdminGetTicketTypes)
 		admin.POST("/ticket-types", controllers.CreateTicketType)
 		admin.GET("/ticket-types/:id", controllers.GetTicketTypeDetail)
@@ -132,51 +119,70 @@ func SetupRouter() *gin.Engine {
 		admin.DELETE("/ticket-types/:id", controllers.DeleteTicketType)
 		admin.PATCH("/ticket-types/:id/status", controllers.UpdateTicketTypeStatus)
 
-		// Admin Dashboard
+		// Dashboard (Scoped)
 		admin.GET("/stats", controllers.AdminGetStats)
 		admin.GET("/dashboard/revenue", controllers.AdminGetRevenueChart)
 		admin.GET("/dashboard/transactions-overview", controllers.GetTransactionsOverview)
 		admin.GET("/dashboard/events-overview", controllers.GetEventsOverview)
-		admin.GET("/dashboard/users-overview", controllers.GetUsersOverview)
+		admin.GET("/dashboard/users-overview", controllers.GetUsersOverview) // Organizer probably shouldn't see ALL users, but maybe their customers? Let's leave for now or restricted?
+		// Wait, Users Overview might leak? Let's assume stats are fine if scoped.
+		// Actually, let's keep Users Overview for Admin only.
 
-		// Admin Users
-		admin.GET("/users", controllers.AdminGetUsers)
-		admin.POST("/users", controllers.AdminCreateUser)
-		admin.GET("/users/:id", controllers.AdminGetUserDetail)
-		admin.PUT("/users/:id", controllers.AdminUpdateUser)
-		admin.DELETE("/users/:id", controllers.AdminDeleteUser)
-		admin.PATCH("/users/:id/role", controllers.AdminUpdateUserRole)
-		admin.PATCH("/users/:id/status", controllers.AdminUpdateUserStatus)
-		admin.GET("/users/:id/activity", controllers.AdminGetUserActivity)
-		admin.GET("/users/:id/transactions", controllers.AdminGetUserTransactions)
-
-		// Admin Transactions
+		// Transactions (Scoped)
 		admin.GET("/transactions", controllers.AdminGetTransactions)
-		admin.GET("/transactions/export", controllers.ExportTransactions)         // Specific route before :id
-		admin.GET("/transactions/revenue-summary", controllers.GetRevenueSummary) // Specific route before :id
+		admin.GET("/transactions/export", controllers.ExportTransactions)
+		admin.GET("/transactions/revenue-summary", controllers.GetRevenueSummary)
 		admin.GET("/transactions/:id", controllers.AdminGetTransactionDetail)
 		admin.POST("/transactions/:id/resend-email", controllers.ResendTicketEmail)
 		admin.POST("/transactions/:id/cancel", controllers.CancelTransaction)
 		admin.POST("/transactions/:id/mark-paid", controllers.MarkTransactionPaid)
 		admin.PUT("/transactions/:id/status", controllers.UpdateTransactionStatus)
 		admin.GET("/transactions/:id/timeline", controllers.GetTransactionTimeline)
-		admin.POST("/transactions/trigger-scraping", controllers.AdminTriggerScraping)
-
-		// Reports
-		admin.GET("/reports/sales", controllers.AdminGetSalesReport)
-		admin.GET("/reports/events", controllers.AdminGetEventsReport)
-		admin.GET("/reports/users", controllers.GetUsersReport)
-		admin.GET("/reports/top-events", controllers.GetTopEventsReport)
-		admin.GET("/reports/export", controllers.AdminExportReport)
+		// admin.POST("/transactions/trigger-scraping", controllers.AdminTriggerScraping) // Scraping is system level
 
 		// Upload
 		admin.POST("/upload", controllers.UploadFile)
-
-		// Site Settings
-		admin.PUT("/settings", controllers.UpdateSettings)
 	}
 
-	// Public Settings
+	// Super Admin Only Routes
+	superAdmin := v1.Group("/admin")
+	superAdmin.Use(middleware.AuthMiddleware(), requireAdmin())
+	{
+		// System Actions
+		superAdmin.POST("/transactions/trigger-scraping", controllers.AdminTriggerScraping)
+
+		// Categories
+		superAdmin.GET("/categories", controllers.AdminGetCategories)
+		superAdmin.POST("/categories", controllers.CreateCategory)
+		superAdmin.GET("/categories/:id", controllers.AdminGetCategoryDetail)
+		superAdmin.PUT("/categories/:id", controllers.UpdateCategory)
+		superAdmin.DELETE("/categories/:id", controllers.DeleteCategory)
+		superAdmin.PATCH("/categories/:id/status", controllers.UpdateCategoryStatus)
+		superAdmin.PUT("/categories/reorder", controllers.ReorderCategories)
+
+		// Users
+		superAdmin.GET("/users", controllers.AdminGetUsers)
+		superAdmin.POST("/users", controllers.AdminCreateUser)
+		superAdmin.GET("/users/:id", controllers.AdminGetUserDetail)
+		superAdmin.PUT("/users/:id", controllers.AdminUpdateUser)
+		superAdmin.DELETE("/users/:id", controllers.AdminDeleteUser)
+		superAdmin.PATCH("/users/:id/role", controllers.AdminUpdateUserRole)
+		superAdmin.PATCH("/users/:id/status", controllers.AdminUpdateUserStatus)
+		superAdmin.GET("/users/:id/activity", controllers.AdminGetUserActivity)
+		superAdmin.GET("/users/:id/transactions", controllers.AdminGetUserTransactions)
+
+		// Reports (Global) - Unless scoped later
+		superAdmin.GET("/reports/sales", controllers.AdminGetSalesReport)
+		superAdmin.GET("/reports/events", controllers.AdminGetEventsReport)
+		superAdmin.GET("/reports/users", controllers.GetUsersReport)
+		superAdmin.GET("/reports/top-events", controllers.GetTopEventsReport)
+		superAdmin.GET("/reports/export", controllers.AdminExportReport)
+
+		// Site Settings
+		superAdmin.PUT("/settings", controllers.UpdateSettings)
+	}
+
+	// Public Settings (Already outside)
 	v1.GET("/settings", controllers.GetSettings)
 
 	return r
@@ -187,6 +193,17 @@ func requireAdmin() gin.HandlerFunc {
 		role, exists := c.Get("userRole")
 		if !exists || role != "admin" {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"success": false, "message": "Admin access required"})
+			return
+		}
+		c.Next()
+	}
+}
+
+func requireAdminOrOrganizer() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		role, exists := c.Get("userRole")
+		if !exists || (role != "admin" && role != "organizer") {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"success": false, "message": "Admin or Organizer access required"})
 			return
 		}
 		c.Next()

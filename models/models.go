@@ -20,7 +20,8 @@ type User struct {
 	Email           string          `gorm:"unique" json:"email"`
 	Password        string          `json:"-"` // Can be empty for OAuth users
 	Phone           string          `json:"phone"`
-	Role            string          `json:"role" gorm:"default:user"`
+	Role            string          `json:"role" gorm:"default:user"`     // admin, organizer, user
+	CustomFee       *float64        `json:"custom_fee"`                   // Specific fee for this organizer
 	Status          string          `json:"status" gorm:"default:active"` // active, inactive, banned
 	Avatar          string          `json:"avatar"`
 	EmailVerifiedAt *time.Time      `json:"email_verified_at"`
@@ -64,7 +65,9 @@ type Event struct {
 	EventTime           string       `json:"event_time"`
 	Venue               string       `json:"venue"`
 	City                string       `json:"city"`
-	Organizer           string       `json:"organizer"`
+	Organizer           string       `json:"organizer"` // Display name
+	OrganizerID         uint         `json:"organizer_id"`
+	OrganizerUser       User         `json:"organizer_user" gorm:"foreignKey:OrganizerID"`
 	Image               string       `json:"image"`
 	Quota               int          `json:"quota"`
 	IsFeatured          bool         `json:"is_featured"`

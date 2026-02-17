@@ -31,6 +31,13 @@ func AdminGetEvents(c *gin.Context) {
 	offset := (page - 1) * limit
 
 	query := config.DB.Model(&models.Event{})
+	// Filters
+	role, _ := c.Get("userRole")
+	if role == "organizer" {
+		userID, _ := c.Get("userID")
+		query = query.Where("organizer_id = ?", userID)
+	}
+
 	status := c.Query("status")
 	if status != "" {
 		query = query.Where("status = ?", status)
@@ -76,6 +83,7 @@ type EventRequest struct {
 	Venue               string               `json:"venue"`
 	City                string               `json:"city"`
 	Organizer           string               `json:"organizer"`
+	OrganizerID         uint                 `json:"organizer_id"` // Added for Admin assignment
 	Image               string               `json:"image"`
 	Quota               int                  `json:"quota"`
 	IsFeatured          *bool                `json:"is_featured"` // Use pointer for boolean
@@ -103,6 +111,15 @@ func parseEventDate(dateStr string) (time.Time, error) {
 }
 
 func CreateEvent(c *gin.Context) {
+	// Get Current User
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "Unauthorized"})
+		return
+	}
+	role, _ := c.Get("userRole")
+	currentUserID := userID.(uint)
+
 	var req EventRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid input", "error": err.Error()})
@@ -166,6 +183,56 @@ func CreateEvent(c *gin.Context) {
 		totalQuota = req.Quota
 	}
 
+	// FEE CALCULATION LOGIC
+	var finalFee float64
+	var organizerID uint
+	organizerName := req.Organizer
+
+	if role == "organizer" {
+		// Force Organizer ID
+		organizerID = currentUserID
+		// Ignore request fee, calculate based on profile
+		var currentUser models.User
+		config.DB.First(&currentUser, currentUserID)
+
+		if currentUser.CustomFee != nil {
+			finalFee = *currentUser.CustomFee
+		} else {
+			// Fetch Global Fee
+			var globalFeeSetting models.SiteSetting
+			if err := config.DB.Where("key = ?", "fee_percentage").First(&globalFeeSetting).Error; err == nil {
+				if val, err := strconv.ParseFloat(globalFeeSetting.Value, 64); err == nil {
+					finalFee = val
+				} else {
+					finalFee = 5.0 // Default fallback
+				}
+			} else {
+				finalFee = 5.0 // Default fallback
+			}
+		}
+
+		// Auto-fill organizer name if empty
+		if organizerName == "" {
+			organizerName = currentUser.Name
+		}
+
+	} else {
+		// Admin / Super Admin
+		// Allow Manual Override from Request
+		if req.FeePercentage > 0 {
+			finalFee = req.FeePercentage
+		} else {
+			finalFee = 5.0 // Default for Admin created if not specified
+		}
+
+		// Assign Owner
+		if req.OrganizerID != 0 {
+			organizerID = req.OrganizerID
+		} else {
+			organizerID = currentUserID // Default to admin self
+		}
+	}
+
 	// Map Request to Model
 	input := models.Event{
 		Title:               req.Title,
@@ -176,7 +243,8 @@ func CreateEvent(c *gin.Context) {
 		EventTime:           req.EventTime,
 		Venue:               req.Venue,
 		City:                req.City,
-		Organizer:           req.Organizer,
+		Organizer:           organizerName,
+		OrganizerID:         organizerID,
 		Image:               req.Image,
 		Quota:               totalQuota, // Auto calculated
 		IsFeatured:          isFeatured,
@@ -184,7 +252,7 @@ func CreateEvent(c *gin.Context) {
 		CategoryID:          req.CategoryID,
 		MinPrice:            minPrice, // Auto calculated
 		MaxPrice:            maxPrice, // Auto calculated
-		FeePercentage:       req.FeePercentage,
+		FeePercentage:       finalFee,
 		CustomFields:        req.CustomFields,
 		TicketTypes:         ticketTypes,
 	}
@@ -196,11 +264,6 @@ func CreateEvent(c *gin.Context) {
 
 	if input.Status == "" {
 		input.Status = "draft"
-	}
-
-	// Default Fee Percentage Logic
-	if input.FeePercentage == 0 {
-		input.FeePercentage = 5.0
 	}
 
 	tx := config.DB.Begin()
