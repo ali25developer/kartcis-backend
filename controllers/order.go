@@ -91,6 +91,12 @@ func CreateOrder(c *gin.Context) {
 			return
 		}
 
+		if ticketType.Event.Status != "published" {
+			tx.Rollback()
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Maaf, event ini sudah berakhir atau tidak tersedia."})
+			return
+		}
+
 		if ticketType.Available < item.Quantity {
 			tx.Rollback()
 			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": fmt.Sprintf("Not enough quota for %s", ticketType.Name)})
