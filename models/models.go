@@ -66,7 +66,7 @@ type Event struct {
 	Image               string       `json:"image"`
 	Quota               int          `json:"quota"`
 	IsFeatured          bool         `json:"is_featured"`
-	Status              string       `json:"status"` // draft, published, ended, cancelled
+	Status              string       `json:"status"` // draft, published, completed, cancelled, sold_out
 	CategoryID          uint         `json:"category_id"`
 	Category            Category     `json:"category" gorm:"foreignKey:CategoryID"`
 	MinPrice            float64      `json:"min_price"`

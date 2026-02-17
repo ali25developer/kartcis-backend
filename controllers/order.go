@@ -97,9 +97,21 @@ func CreateOrder(c *gin.Context) {
 			return
 		}
 
+		if ticketType.Event.Status == "completed" {
+			tx.Rollback()
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Maaf, event ini sudah selesai."})
+			return
+		}
+
+		if ticketType.Event.Status == "sold_out" {
+			tx.Rollback()
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Maaf, tiket untuk event ini sudah habis terjual."})
+			return
+		}
+
 		if ticketType.Event.Status != "published" {
 			tx.Rollback()
-			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Maaf, event ini sudah berakhir atau tidak tersedia."})
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Maaf, event ini tidak tersedia saat ini."})
 			return
 		}
 

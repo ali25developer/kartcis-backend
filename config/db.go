@@ -71,6 +71,10 @@ func ConnectDB() {
 	}
 
 	seedSettings(DB)
+
+	// Data Migration: Rename 'ended' to 'completed'
+	DB.Exec("UPDATE events SET status = 'completed' WHERE status = 'ended'")
+
 	seedSampleEvents(DB)
 }
 
@@ -101,23 +105,42 @@ func seedSampleEvents(db *gorm.DB) {
 		log.Println("Seeded cancelled event: ", cancelledEvent.Title)
 	}
 
-	// 3. Sample Ended Event (Past Date)
-	var endedEvent models.Event
-	if err := db.Where("slug = ?", "festival-kuliner-lampau").First(&endedEvent).Error; err != nil {
-		endedEvent = models.Event{
+	// 3. Sample Completed Event (Past Date)
+	var completedEvent models.Event
+	if err := db.Where("slug = ?", "festival-kuliner-lampau").First(&completedEvent).Error; err != nil {
+		completedEvent = models.Event{
 			Title:       "Festival Kuliner Nusantara (Selesai)",
 			Slug:        "festival-kuliner-lampau",
 			Description: "Event kuliner yang telah sukses dilaksanakan.",
 			EventDate:   time.Now().Add(-72 * time.Hour), // 3 days ago
 			Venue:       "Alun-alun Kota",
 			City:        "Yogyakarta",
-			Status:      "ended",
+			Status:      "completed",
 			CategoryID:  category.ID,
 			MinPrice:    25000,
 			MaxPrice:    75000,
 		}
-		db.Create(&endedEvent)
-		log.Println("Seeded ended event: ", endedEvent.Title)
+		db.Create(&completedEvent)
+		log.Println("Seeded completed event: ", completedEvent.Title)
+	}
+
+	// 4. Sample Sold Out Event
+	var soldOutEvent models.Event
+	if err := db.Where("slug = ?", "workshop-digital-marketing-habis").First(&soldOutEvent).Error; err != nil {
+		soldOutEvent = models.Event{
+			Title:       "Workshop Digital Marketing (Sold Out)",
+			Slug:        "workshop-digital-marketing-habis",
+			Description: "Workshop intensif marketing digital.",
+			EventDate:   time.Now().Add(120 * time.Hour),
+			Venue:       "Co-working Space",
+			City:        "Bandung",
+			Status:      "sold_out",
+			CategoryID:  category.ID,
+			MinPrice:    150000,
+			MaxPrice:    150000,
+		}
+		db.Create(&soldOutEvent)
+		log.Println("Seeded sold_out event: ", soldOutEvent.Title)
 	}
 }
 
