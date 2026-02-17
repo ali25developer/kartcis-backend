@@ -36,7 +36,7 @@ func GetMyTickets(c *gin.Context) {
 		Joins("JOIN orders ON orders.id = tickets.order_id").
 		Joins("JOIN events ON events.id = tickets.event_id").
 		Where("orders.user_id = ?", userID).
-		Order("tickets.created_at desc").
+		Order("orders.paid_at DESC NULLS LAST").
 		Preload("Order").
 		Preload("Event").
 		Preload("TicketType").
