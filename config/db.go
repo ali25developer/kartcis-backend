@@ -75,6 +75,9 @@ func ConnectDB() {
 	// Data Migration: Rename 'ended' to 'completed'
 	DB.Exec("UPDATE events SET status = 'completed' WHERE status = 'ended'")
 
+	// Data Cleanup: Cap Available at Quota (Fixes data corruption where available > quota)
+	DB.Exec("UPDATE ticket_types SET available = quota WHERE available > quota OR available < 0")
+
 	seedSampleEvents(DB)
 }
 

@@ -395,6 +395,11 @@ func UpdateEvent(c *gin.Context) {
 						// Keep current availability if quota didn't change
 						tt.Available = oldTT.Available
 					}
+
+					// Safety Check: Never exceed Quota
+					if tt.Available > tt.Quota {
+						tt.Available = tt.Quota
+					}
 				}
 
 				if err := tx.Model(&models.TicketType{}).Where("id = ? AND event_id = ?", tt.ID, event.ID).

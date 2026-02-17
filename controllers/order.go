@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type CheckoutRequest struct {
@@ -115,20 +116,29 @@ func CreateOrder(c *gin.Context) {
 			return
 		}
 
+		if item.Quantity <= 0 {
+			tx.Rollback()
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Quantity must be at least 1"})
+			return
+		}
+
 		if ticketType.Available < item.Quantity {
 			tx.Rollback()
 			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": fmt.Sprintf("Not enough quota for %s", ticketType.Name)})
 			return
 		}
 
-		// Deduct quota
-		newAvailable := ticketType.Available - item.Quantity
-		if err := tx.Model(&ticketType).Update("available", newAvailable).Error; err != nil {
+		// Deduct quota atomically
+		if err := tx.Model(&ticketType).
+			Where("available >= ?", item.Quantity).
+			Update("available", gorm.Expr("available - ?", item.Quantity)).Error; err != nil {
 			tx.Rollback()
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to update quota", "error": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to update quota (oversold check)"})
 			return
 		}
-		ticketType.Available = newAvailable
+
+		// Refresh from DB to get the new 'available' value for the rest of the logic
+		tx.First(&ticketType, ticketType.ID)
 
 		itemSubtotal := ticketType.Price * float64(item.Quantity)
 		totalAmount += itemSubtotal

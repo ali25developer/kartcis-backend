@@ -20,8 +20,19 @@ func RestoreQuota(tx *gorm.DB, orderID uint) error {
 	}
 
 	for ttID, count := range counts {
+		// Get the current Quota to ensure we don't restore beyond it
+		var tt models.TicketType
+		if err := tx.First(&tt, ttID).Error; err != nil {
+			continue
+		}
+
+		newAvailable := tt.Available + count
+		if newAvailable > tt.Quota {
+			newAvailable = tt.Quota
+		}
+
 		if err := tx.Model(&models.TicketType{}).Where("id = ?", ttID).
-			Update("available", gorm.Expr("available + ?", count)).Error; err != nil {
+			Update("available", newAvailable).Error; err != nil {
 			return err
 		}
 	}
