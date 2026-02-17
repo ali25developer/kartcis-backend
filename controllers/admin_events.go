@@ -45,7 +45,7 @@ func AdminGetEvents(c *gin.Context) {
 	query.Count(&totalItems)
 
 	// Fetch Data
-	query.Preload("Category").Preload("TicketTypes").Order("created_at desc").Limit(limit).Offset(offset).Find(&events)
+	query.Preload("Category").Preload("TicketTypes").Order("updated_at desc").Limit(limit).Offset(offset).Find(&events)
 
 	totalPages := int(totalItems) / limit
 	if int(totalItems)%limit != 0 {
