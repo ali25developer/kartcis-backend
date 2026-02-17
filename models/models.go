@@ -2,6 +2,8 @@ package models
 
 import (
 	"time"
+
+	"gorm.io/gorm"
 )
 
 type SiteSetting struct {
@@ -88,8 +90,20 @@ type TicketType struct {
 	OriginalPrice float64   `json:"original_price"`
 	Quota         int       `json:"quota"`
 	Available     int       `json:"available"`
+	Sold          int       `json:"sold" gorm:"-"` // Virtual field: Quota - Available
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// Hooks to calculate Sold field
+func (tt *TicketType) AfterFind(tx *gorm.DB) (err error) {
+	tt.Sold = tt.Quota - tt.Available
+	return
+}
+
+func (tt *TicketType) AfterSave(tx *gorm.DB) (err error) {
+	tt.Sold = tt.Quota - tt.Available
+	return
 }
 
 type Order struct {
