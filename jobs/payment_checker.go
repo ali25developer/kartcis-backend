@@ -154,16 +154,29 @@ func processJagoEmail(body string) {
 	log.Printf("[PaymentJob] Found Jago Transfer: Rp %v\n", amount)
 
 	// Search for pending order with this exact amount
+	// Search for matching order
 	var order models.Order
-	// Using UniqueCode and TotalAmount as double check
-	err = config.DB.Where("status = ? AND total_amount = ?", "pending", amount).First(&order).Error
-	if err != nil {
-		// No matching order
-		return
+
+	// 1. Prioritize PENDING orders (Exact match total amount)
+	// Note: GORM where automatically handles the condition securely
+	if err := config.DB.Where("status = ? AND total_amount = ?", "pending", amount).First(&order).Error; err != nil {
+
+		// 2. Fallback: Check RECENTLY Cancelled/Expired orders (within last 60 mins)
+		oneHourAgo := time.Now().Add(-60 * time.Minute)
+		if err := config.DB.Where("status IN ? AND total_amount = ? AND created_at >= ?",
+			[]string{"cancelled", "expired"}, amount, oneHourAgo).
+			Order("created_at desc"). // Pick the NEWEST attempt if multiple exist
+			First(&order).Error; err != nil {
+
+			// Still not found even in history -> Give up
+			return
+		}
+		log.Printf("[PaymentJob] Found matching CANCELLED/EXPIRED order: %s. Reviving...", order.OrderNumber)
 	}
 
 	// Double check if it's a Bank Transfer Jago payment
-	if !strings.Contains(order.PaymentMethod, "BANK_TRANSFER_JAGO") {
+	if !strings.Contains(order.PaymentMethod, "BANK_TRANSFER_JAGO") && order.PaymentMethod != "MANUAL_JAGO" {
+		log.Printf("[PaymentJob] Ignored order %s. Payment Method is %s (Not Jago)\n", order.OrderNumber, order.PaymentMethod)
 		return
 	}
 

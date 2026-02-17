@@ -601,6 +601,7 @@ func processPaymentGateway(order *models.Order, paymentMethod string, userID *ui
 		}
 
 		order.VirtualAccountNumber = accNo
+		order.PaymentData = accName
 		order.PaymentInstructions = fmt.Sprintf("Silakan transfer ke Bank Jago: %s a/n %s. Pastikan nominal sampai 3 digit terakhir (Rp %v) agar dapat diverifikasi otomatis.", accNo, accName, utils.FormatPrice(order.TotalAmount))
 		return
 	}
