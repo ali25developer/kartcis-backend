@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"time"
 
 	"kartcis-backend/models"
 
@@ -78,73 +77,7 @@ func ConnectDB() {
 	// Data Cleanup: Cap Available at Quota (Fixes data corruption where available > quota)
 	DB.Exec("UPDATE ticket_types SET available = quota WHERE available > quota OR available < 0")
 
-	seedSampleEvents(DB)
-}
-
-func seedSampleEvents(db *gorm.DB) {
-	// 1. Get or Create Category
-	var category models.Category
-	if err := db.First(&category).Error; err != nil {
-		category = models.Category{Name: "General", Slug: "general", IsActive: true}
-		db.Create(&category)
-	}
-
-	// 2. Sample Cancelled Event
-	var cancelledEvent models.Event
-	if err := db.Where("slug = ?", "konser-musik-batal").First(&cancelledEvent).Error; err != nil {
-		cancelledEvent = models.Event{
-			Title:       "Konser Musik Rock (Dibatalkan)",
-			Slug:        "konser-musik-batal",
-			Description: "Mohon maaf konser ini dibatalkan karena alasan teknis.",
-			EventDate:   time.Now().Add(48 * time.Hour),
-			Venue:       "Stadion Utama",
-			City:        "Jakarta",
-			Status:      "cancelled",
-			CategoryID:  category.ID,
-			MinPrice:    100000,
-			MaxPrice:    500000,
-		}
-		db.Create(&cancelledEvent)
-		log.Println("Seeded cancelled event: ", cancelledEvent.Title)
-	}
-
-	// 3. Sample Completed Event (Past Date)
-	var completedEvent models.Event
-	if err := db.Where("slug = ?", "festival-kuliner-lampau").First(&completedEvent).Error; err != nil {
-		completedEvent = models.Event{
-			Title:       "Festival Kuliner Nusantara (Selesai)",
-			Slug:        "festival-kuliner-lampau",
-			Description: "Event kuliner yang telah sukses dilaksanakan.",
-			EventDate:   time.Now().Add(-72 * time.Hour), // 3 days ago
-			Venue:       "Alun-alun Kota",
-			City:        "Yogyakarta",
-			Status:      "completed",
-			CategoryID:  category.ID,
-			MinPrice:    25000,
-			MaxPrice:    75000,
-		}
-		db.Create(&completedEvent)
-		log.Println("Seeded completed event: ", completedEvent.Title)
-	}
-
-	// 4. Sample Sold Out Event
-	var soldOutEvent models.Event
-	if err := db.Where("slug = ?", "workshop-digital-marketing-habis").First(&soldOutEvent).Error; err != nil {
-		soldOutEvent = models.Event{
-			Title:       "Workshop Digital Marketing (Sold Out)",
-			Slug:        "workshop-digital-marketing-habis",
-			Description: "Workshop intensif marketing digital.",
-			EventDate:   time.Now().Add(120 * time.Hour),
-			Venue:       "Co-working Space",
-			City:        "Bandung",
-			Status:      "sold_out",
-			CategoryID:  category.ID,
-			MinPrice:    150000,
-			MaxPrice:    150000,
-		}
-		db.Create(&soldOutEvent)
-		log.Println("Seeded sold_out event: ", soldOutEvent.Title)
-	}
+	seedSettings(DB)
 }
 
 func seedSettings(db *gorm.DB) {
