@@ -34,9 +34,11 @@ func ConnectDB() {
 	fmt.Println("Connected to Database!")
 
 	// Sync Models with DB
+	fmt.Println("Running AutoMigrate...")
 	err = DB.AutoMigrate(
 		&models.User{},
 		&models.Category{},
+		&models.Voucher{},
 		&models.Event{},
 		&models.TicketType{},
 		&models.Order{},
@@ -49,6 +51,8 @@ func ConnectDB() {
 	)
 	if err != nil {
 		log.Println("Migration failed:", err)
+	} else {
+		fmt.Println("AutoMigrate completed successfully!")
 	}
 
 	// Manual Migration Fix: Ensure new columns exist if AutoMigrate fails
@@ -63,6 +67,12 @@ func ConnectDB() {
 	}
 	if !DB.Migrator().HasColumn(&models.Order{}, "payment_instructions") {
 		DB.Migrator().AddColumn(&models.Order{}, "payment_instructions")
+	}
+	if !DB.Migrator().HasColumn(&models.Order{}, "discount_amount") {
+		DB.Migrator().AddColumn(&models.Order{}, "discount_amount")
+	}
+	if !DB.Migrator().HasColumn(&models.Order{}, "voucher_code") {
+		DB.Migrator().AddColumn(&models.Order{}, "voucher_code")
 	}
 
 	// Manual Migration for Multi-Role Features
@@ -88,6 +98,12 @@ func ConnectDB() {
 	}
 	if !DB.Migrator().HasTable(&models.RequestLog{}) {
 		DB.Migrator().CreateTable(&models.RequestLog{})
+	}
+	if !DB.Migrator().HasTable(&models.Voucher{}) {
+		DB.Migrator().CreateTable(&models.Voucher{})
+	}
+	if !DB.Migrator().HasTable(&models.PasswordReset{}) {
+		DB.Migrator().CreateTable(&models.PasswordReset{})
 	}
 
 	seedSettings(DB)

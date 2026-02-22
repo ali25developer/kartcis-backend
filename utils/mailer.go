@@ -14,17 +14,21 @@ import (
 )
 
 type TicketEmailData struct {
-	CustomerName         string
-	OrderNumber          string
-	EventTitle           string
-	EventImage           string
-	EventDate            string
-	EventTime            string
-	Venue                string
-	City                 string
+	CustomerName string
+	OrderNumber  string
+	EventTitle   string
+	EventImage   string
+	EventDate    string
+	EventTime    string
+	Venue        string
+	City         string
+	Tickets      []TicketItemData
+}
+
+type TicketItemData struct {
+	AttendeeName         string
 	TicketTypeName       string
 	TicketCode           string
-	Quantity             int
 	CustomFieldResponses []CustomFieldResponse
 }
 
@@ -58,12 +62,28 @@ type CancellationEmailData struct {
 	Reason       string
 }
 
+type EventEmailGroupKey struct {
+	Email   string
+	EventID uint
+}
+
 func SendTicketEmail(order models.Order, tickets []models.Ticket) {
 	if len(tickets) == 0 {
 		return
 	}
-	for _, ticket := range tickets {
-		go sendTicketEmail(order, ticket)
+
+	groupedTickets := make(map[EventEmailGroupKey][]models.Ticket)
+	for _, t := range tickets {
+		email := t.AttendeeEmail
+		if email == "" {
+			email = order.CustomerEmail
+		}
+		key := EventEmailGroupKey{Email: email, EventID: t.EventID}
+		groupedTickets[key] = append(groupedTickets[key], t)
+	}
+
+	for key, group := range groupedTickets {
+		go sendGroupedTicketsEmail(order, group, key.Email)
 	}
 }
 
@@ -75,12 +95,7 @@ func SendOrderCancelledEmail(order models.Order, reason string) {
 	go sendCancellationEmail(order, reason)
 }
 
-// For simplicity, we send one email per ticket or one email for the whole order?
-// The template suggests one ticket detail, but let's send for the first ticket or loop.
-// Usually, users get one email per ticket if it's a PDF delivery, or one summary.
-// The provided template looks like an E-Ticket for a single attendee.
-
-func sendTicketEmail(order models.Order, ticket models.Ticket) {
+func sendGroupedTicketsEmail(order models.Order, tickets []models.Ticket, recipientEmail string) {
 	// Load SMTP config
 	smtpHost := os.Getenv("SMTP_HOST")
 	smtpPort := os.Getenv("SMTP_PORT")
@@ -93,52 +108,68 @@ func sendTicketEmail(order models.Order, ticket models.Ticket) {
 		return
 	}
 
-	// Parse Custom Fields
-	var responses []CustomFieldResponse
-	if ticket.CustomFieldResponses != "" && ticket.CustomFieldResponses != "null" {
-		// Try map first
-		var rawMap map[string]interface{}
-		if err := json.Unmarshal([]byte(ticket.CustomFieldResponses), &rawMap); err == nil {
-			for k, v := range rawMap {
-				responses = append(responses, CustomFieldResponse{
-					Label: k,
-					Value: fmt.Sprintf("%v", v),
-				})
-			}
-		} else {
-			// Try slice of objects
-			var rawSlice []map[string]interface{}
-			if err := json.Unmarshal([]byte(ticket.CustomFieldResponses), &rawSlice); err == nil {
-				for _, item := range rawSlice {
-					label, _ := item["label"].(string)
-					if label == "" {
-						label, _ = item["key"].(string)
-					}
-					value := fmt.Sprintf("%v", item["value"])
-					if label != "" && value != "<nil>" {
-						responses = append(responses, CustomFieldResponse{
-							Label: label,
-							Value: value,
-						})
+	firstTicket := tickets[0]
+
+	var items []TicketItemData
+	for _, ticket := range tickets {
+		// Parse Custom Fields
+		var responses []CustomFieldResponse
+		if ticket.CustomFieldResponses != "" && ticket.CustomFieldResponses != "null" {
+			// Try map first
+			var rawMap map[string]interface{}
+			if err := json.Unmarshal([]byte(ticket.CustomFieldResponses), &rawMap); err == nil {
+				for k, v := range rawMap {
+					responses = append(responses, CustomFieldResponse{
+						Label: k,
+						Value: fmt.Sprintf("%v", v),
+					})
+				}
+			} else {
+				// Try slice of objects
+				var rawSlice []map[string]interface{}
+				if err := json.Unmarshal([]byte(ticket.CustomFieldResponses), &rawSlice); err == nil {
+					for _, item := range rawSlice {
+						label, _ := item["label"].(string)
+						if label == "" {
+							label, _ = item["key"].(string)
+						}
+						value := fmt.Sprintf("%v", item["value"])
+						if label != "" && value != "<nil>" {
+							responses = append(responses, CustomFieldResponse{
+								Label: label,
+								Value: value,
+							})
+						}
 					}
 				}
 			}
 		}
+
+		items = append(items, TicketItemData{
+			AttendeeName:         ticket.AttendeeName,
+			TicketTypeName:       ticket.TicketType.Name,
+			TicketCode:           ticket.TicketCode,
+			CustomFieldResponses: responses,
+		})
+	}
+
+	customerName := recipientEmail
+	if recipientEmail == order.CustomerEmail {
+		customerName = order.CustomerName
+	} else if len(items) > 0 && items[0].AttendeeName != "" {
+		customerName = items[0].AttendeeName
 	}
 
 	data := TicketEmailData{
-		CustomerName:         ticket.AttendeeName,
-		OrderNumber:          order.OrderNumber,
-		EventTitle:           ticket.Event.Title,
-		EventImage:           formatImageURL(ticket.Event.Image),
-		EventDate:            ticket.Event.EventDate.Format("02 Jan 2006"),
-		EventTime:            ticket.Event.EventTime,
-		Venue:                ticket.Event.Venue,
-		City:                 ticket.Event.City,
-		TicketTypeName:       ticket.TicketType.Name,
-		TicketCode:           ticket.TicketCode,
-		Quantity:             1,
-		CustomFieldResponses: responses,
+		CustomerName: customerName,
+		OrderNumber:  order.OrderNumber,
+		EventTitle:   firstTicket.Event.Title,
+		EventImage:   formatImageURL(firstTicket.Event.Image),
+		EventDate:    firstTicket.Event.EventDate.Format("02 Jan 2006"),
+		EventTime:    firstTicket.Event.EventTime,
+		Venue:        firstTicket.Event.Venue,
+		City:         firstTicket.Event.City,
+		Tickets:      items,
 	}
 
 	tmpl, err := template.New("ticket").Parse(htmlTemplate)
@@ -154,11 +185,15 @@ func sendTicketEmail(order models.Order, ticket models.Ticket) {
 	}
 
 	auth := smtp.PlainAuth("", smtpUser, smtpPass, smtpHost)
-	to := []string{ticket.AttendeeEmail}
+	to := []string{recipientEmail}
 
-	subject := fmt.Sprintf("[Berhasil] E-Tiket Anda untuk %s - #%s", ticket.Event.Title, order.OrderNumber)
+	subject := fmt.Sprintf("[Berhasil] %d E-Tiket Anda untuk %s - #%s", len(tickets), firstTicket.Event.Title, order.OrderNumber)
+	if len(tickets) == 1 {
+		subject = fmt.Sprintf("[Berhasil] E-Tiket Anda untuk %s - #%s", firstTicket.Event.Title, order.OrderNumber)
+	}
+
 	msg := []byte("From: " + from + "\r\n" +
-		"To: " + ticket.AttendeeEmail + "\r\n" +
+		"To: " + recipientEmail + "\r\n" +
 		"Subject: " + subject + "\r\n" +
 		"MIME-Version: 1.0\r\n" +
 		"Content-Type: text/html; charset=UTF-8\r\n\r\n" +
@@ -168,7 +203,7 @@ func sendTicketEmail(order models.Order, ticket models.Ticket) {
 	if err != nil {
 		log.Println("[Mailer] SendMail Error:", err)
 	} else {
-		log.Printf("[Mailer] Email sent successfully to %s for ticket %s\n", ticket.AttendeeEmail, ticket.TicketCode)
+		log.Printf("[Mailer] Email sent successfully to %s for %d tickets\n", recipientEmail, len(tickets))
 	}
 }
 
@@ -369,27 +404,30 @@ const htmlTemplate = `
                 <p>Halo <b>{{.CustomerName}}</b>, pembayaran Anda telah berhasil dikonfirmasi. Berikut adalah detail tiket untuk pesanan <b>#{{.OrderNumber}}</b>.</p>
             </div>
             <div class="content">
-                <div class="ticket-item">
-                    <div class="event-banner">
-                        <img src="{{.EventImage}}" alt="Event Image">
+                <div class="event-banner" style="margin-bottom: 24px; border-radius: 12px; overflow: hidden; background-color: #f1f5f9; text-align: center;">
+                    <img src="{{.EventImage}}" alt="Event Image" style="width: 100%; height: auto; display: block; max-height: 250px; object-fit: cover;">
+                </div>
+                <div style="text-align:center; margin-bottom: 24px; padding: 0 16px;">
+                    <h2 class="event-title">{{.EventTitle}}</h2>
+                    <div style="display: flex; flex-direction: column; gap: 8px; font-size: 14px; color: #374151; margin-top: 12px;">
+                        <div><span style="margin-right:8px;">📅</span> <b>Tanggal:</b> {{.EventDate}}</div>
+                        <div><span style="margin-right:8px;">🕒</span> <b>Waktu:</b> {{.EventTime}} WIB</div>
+                        <div><span style="margin-right:8px;">📍</span> <b>Lokasi:</b> {{.Venue}}, {{.City}}</div>
                     </div>
+                </div>
+
+                <div style="text-align:center; padding: 12px 0 24px 0;">
+                    <p style="font-size: 14px; color: #64748b;">Tunjukkan QR Code berikut kepada petugas saat memasuki area event.</p>
+                </div>
+
+                {{range .Tickets}}
+                <div class="ticket-item">
                     <div class="ticket-details">
                         <div class="badge badge-sky">{{.TicketTypeName}}</div>
-                        <h2 class="event-title">{{.EventTitle}}</h2>
-                        <div class="info-grid">
-                            <div class="info-item">
-                                <span class="info-icon">📅</span> 
-                                <span><b>Tanggal:</b> {{.EventDate}}</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-icon">🕒</span> 
-                                <span><b>Waktu:</b> {{.EventTime}} WIB</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-icon">📍</span> 
-                                <span><b>Lokasi:</b> {{.Venue}}, {{.City}}</span>
-                            </div>
+                        <div style="margin-top: 12px; font-size: 16px; font-weight: 700; color: #1e293b;">
+                            👤 {{.AttendeeName}}
                         </div>
+
 						{{if .CustomFieldResponses}}
 						<div class="custom-fields">
 							<div class="custom-fields-title">Data Pengunjung</div>
@@ -403,23 +441,19 @@ const htmlTemplate = `
 							</table>
 						</div>
 						{{end}}
+
                         <div class="ticket-footer">
-                            <div class="footer-left">
+                            <div class="footer-left" style="width: 100%;">
                                 <div class="code-label">Kode Unik Tiket</div>
                                 <div class="code-value">{{.TicketCode}}</div>
                             </div>
-                            <div class="footer-right">
-                                <div class="code-label">Jumlah</div>
-                                <div style="font-weight: 700; color: #1e293b; font-size: 16px;">{{.Quantity}} Tiket</div>
-                            </div>
                         </div>
                     </div>
+                    <div class="qr-section" style="padding: 24px; border-top: 2px dashed #e2e8f0; background-color: #f8fafc; text-align: center;">
+                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=250x250&data={{.TicketCode}}" class="qr-code-img" width="250" height="250" alt="Check-in QR Code" style="margin-bottom: 0;">
+                    </div>
                 </div>
-            </div>
-            <div class="qr-section">
-                <p style="font-size: 13px; font-weight: 700; color: #64748b; text-transform: uppercase; margin: 0 0 16px;">Tunjukkan QR Code ini saat masuk</p>
-                <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={{.TicketCode}}" class="qr-code-img" width="180" height="180" alt="Check-in QR Code">
-                <p style="font-size: 14px; color: #334155; margin-top: 10px;">Gunakan layar penuh dan cerahkan pencahayaan HP Anda saat di-*scan* oleh petugas.</p>
+                {{end}}
             </div>
             <div class="legal-footer">
                 Pesanan ini diproses secara aman oleh <b>Kartcis.ID</b>.<br>

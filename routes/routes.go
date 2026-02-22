@@ -81,6 +81,7 @@ func SetupRouter() *gin.Engine {
 	// So if I rename route param to :order_number, I must update controller too.
 
 	// Orders (Guest or Auth)
+	v1.GET("/vouchers/validate", controllers.ValidateVoucher) // Public access for checking codes
 	v1.POST("/orders", middleware.OptionalAuthMiddleware(), controllers.CreateOrder)
 	v1.GET("/orders/:order_number", middleware.OptionalAuthMiddleware(), controllers.GetOrderDetail)
 	v1.GET("/orders/:order_number/tickets", middleware.OptionalAuthMiddleware(), controllers.GetOrderTickets)
@@ -118,6 +119,14 @@ func SetupRouter() *gin.Engine {
 		admin.PUT("/ticket-types/:id", controllers.UpdateTicketType)
 		admin.DELETE("/ticket-types/:id", controllers.DeleteTicketType)
 		admin.PATCH("/ticket-types/:id/status", controllers.UpdateTicketTypeStatus)
+
+		// Vouchers (Scoped)
+		admin.GET("/vouchers", controllers.AdminGetVouchers)
+		admin.POST("/vouchers", controllers.CreateVoucher)
+		admin.GET("/vouchers/:id", controllers.GetVoucherDetail)
+		admin.PUT("/vouchers/:id", controllers.UpdateVoucher)
+		admin.DELETE("/vouchers/:id", controllers.DeleteVoucher)
+		admin.PATCH("/vouchers/:id/status", controllers.UpdateVoucherStatus)
 
 		// Dashboard (Scoped)
 		admin.GET("/stats", controllers.AdminGetStats)

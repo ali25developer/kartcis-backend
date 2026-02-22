@@ -55,6 +55,24 @@ type Category struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+type Voucher struct {
+	ID                uint        `gorm:"primaryKey" json:"id"`
+	Code              string      `gorm:"uniqueIndex" json:"code"`
+	DiscountType      string      `json:"discount_type"` // "percent" or "fixed"
+	DiscountValue     float64     `json:"discount_value"`
+	MaxDiscountAmount *float64    `json:"max_discount_amount"` // For percent type ceiling limit if needed
+	MaxUses           int         `json:"max_uses"`            // Total allowed uses across all users
+	UsedCount         int         `json:"used_count"`          // Current times used
+	EventID           *uint       `json:"event_id"`            // Nullable, if null = global voucher
+	Event             *Event      `json:"event,omitempty" gorm:"foreignKey:EventID"`
+	TicketTypeID      *uint       `json:"ticket_type_id"`
+	TicketType        *TicketType `json:"ticket_type,omitempty" gorm:"foreignKey:TicketTypeID"`
+	ExpiresAt         *time.Time  `json:"expires_at"`
+	IsActive          bool        `json:"is_active" gorm:"default:true"`
+	CreatedAt         time.Time   `json:"created_at"`
+	UpdatedAt         time.Time   `json:"updated_at"`
+}
+
 type Event struct {
 	ID                  uint         `gorm:"primaryKey" json:"id"`
 	Title               string       `json:"title"`
@@ -118,6 +136,8 @@ type Order struct {
 	CustomerPhone        string     `json:"customer_phone"`
 	TotalAmount          float64    `json:"total_amount"`
 	AdminFee             float64    `json:"admin_fee"`
+	DiscountAmount       float64    `json:"discount_amount"` // New field
+	VoucherCode          string     `json:"voucher_code"`    // New field
 	UniqueCode           int        `json:"unique_code"`
 	Status               string     `json:"status"`
 	PaymentMethod        string     `json:"payment_method"`

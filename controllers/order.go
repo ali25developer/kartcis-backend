@@ -29,6 +29,7 @@ type CheckoutRequest struct {
 		} `json:"attendees"`
 	} `json:"items"`
 	PaymentMethod string `json:"payment_method"`
+	VoucherCode   string `json:"voucher_code"` // Added for discount
 	// Guest Info (Optional if logged in)
 	CustomerInfo struct {
 		Name  string `json:"name"`
@@ -50,6 +51,7 @@ func CreateOrder(c *gin.Context) {
 
 	var totalAmount float64
 	var orderItems []models.Ticket
+	ticketPrices := make(map[uint]float64)
 
 	// Determine Customer Info
 	var customerName, customerEmail, customerPhone string
@@ -140,6 +142,7 @@ func CreateOrder(c *gin.Context) {
 		// Refresh from DB to get the new 'available' value for the rest of the logic
 		tx.First(&ticketType, ticketType.ID)
 
+		ticketPrices[ticketType.ID] = ticketType.Price
 		itemSubtotal := ticketType.Price * float64(item.Quantity)
 		totalAmount += itemSubtotal
 
@@ -195,11 +198,98 @@ func CreateOrder(c *gin.Context) {
 		}
 	}
 
+	// Voucher Processing
+	var discountAmount float64
+	var appliedVoucherCode string
+
+	if req.VoucherCode != "" {
+		var voucher models.Voucher
+		// Check validity: is_active, expires_at tracking
+		if err := tx.Where("code = ? AND is_active = ?", req.VoucherCode, true).First(&voucher).Error; err == nil {
+			valid := true
+			if voucher.ExpiresAt != nil && voucher.ExpiresAt.Before(time.Now()) {
+				valid = false
+			}
+			if voucher.MaxUses > 0 && voucher.UsedCount >= voucher.MaxUses {
+				valid = false
+			}
+
+			// If event_id is specified, make sure it matches the current items
+			// For simplicity we check if the voucher applies to AT LEAST ONE item
+			if valid && (voucher.EventID != nil || voucher.TicketTypeID != nil) {
+				eventMatch := false
+				ticketTypeMatch := false
+				for _, item := range orderItems {
+					if voucher.EventID != nil && item.EventID == *voucher.EventID {
+						eventMatch = true
+					}
+					if voucher.TicketTypeID != nil && item.TicketTypeID == *voucher.TicketTypeID {
+						ticketTypeMatch = true
+					}
+				}
+
+				if voucher.EventID != nil && !eventMatch {
+					valid = false
+				}
+				if voucher.TicketTypeID != nil && !ticketTypeMatch {
+					valid = false
+				}
+			}
+
+			if valid {
+				// Calculate eligible amount
+				var eligibleAmount float64
+				for _, item := range orderItems {
+					isEligible := true
+					if voucher.EventID != nil && item.EventID != *voucher.EventID {
+						isEligible = false
+					}
+					if voucher.TicketTypeID != nil && item.TicketTypeID != *voucher.TicketTypeID {
+						isEligible = false
+					}
+					if isEligible {
+						eligibleAmount += ticketPrices[item.TicketTypeID]
+					}
+				}
+
+				// Calculate discount against eligible amount only
+				if voucher.DiscountType == "percent" {
+					calc := eligibleAmount * (voucher.DiscountValue / 100)
+					if voucher.MaxDiscountAmount != nil && calc > *voucher.MaxDiscountAmount {
+						discountAmount = *voucher.MaxDiscountAmount
+					} else {
+						discountAmount = calc
+					}
+				} else if voucher.DiscountType == "fixed" {
+					discountAmount = voucher.DiscountValue // fixed discount applies globally but bounded by eligibleAmount? Or per eligibleAmount? Let's just limit by eligibleAmount
+				}
+
+				if discountAmount > eligibleAmount {
+					discountAmount = eligibleAmount // Never discount more than eligible price
+				}
+
+				appliedVoucherCode = voucher.Code
+
+				// Increment used_count
+				tx.Model(&voucher).Update("used_count", gorm.Expr("used_count + ?", 1))
+			} else {
+				// Don't fail the whole order, but ideally return error so user knows.
+				tx.Rollback()
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Voucher tidak valid atau sudah kadaluarsa"})
+				return
+			}
+		} else {
+			tx.Rollback()
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Kode voucher tidak ditemukan"})
+			return
+		}
+	}
+
 	// Handle Unique Code for Manual Bank Transfer
 	var uniqueCode int
 	if strings.HasPrefix(req.PaymentMethod, "BANK_TRANSFER_") || req.PaymentMethod == "MANUAL_JAGO" {
 		// Generate unique code and ensure TOTAL AMOUNT is unique for pending orders
-		baseAmount := totalAmount + totalAdminFee
+		baseAmount := totalAmount + totalAdminFee - discountAmount
 
 		// 1. Get ALL currently used codes for this amount
 		var usedCodes []int
@@ -239,17 +329,19 @@ func CreateOrder(c *gin.Context) {
 
 	// Create Order
 	order := models.Order{
-		UserID:        userID,
-		OrderNumber:   fmt.Sprintf("ORD-%d", time.Now().Unix()),
-		CustomerName:  customerName,
-		CustomerEmail: customerEmail,
-		CustomerPhone: customerPhone,
-		TotalAmount:   totalAmount + totalAdminFee + float64(uniqueCode), // Add fee and unique code to total
-		AdminFee:      totalAdminFee,
-		UniqueCode:    uniqueCode,
-		Status:        "pending",
-		PaymentMethod: req.PaymentMethod,
-		CreatedAt:     time.Now(),
+		UserID:         userID,
+		OrderNumber:    fmt.Sprintf("ORD-%d", time.Now().Unix()),
+		CustomerName:   customerName,
+		CustomerEmail:  customerEmail,
+		CustomerPhone:  customerPhone,
+		TotalAmount:    totalAmount + totalAdminFee - discountAmount + float64(uniqueCode), // Add fee, unique code, subtract discount
+		AdminFee:       totalAdminFee,
+		DiscountAmount: discountAmount,
+		VoucherCode:    appliedVoucherCode,
+		UniqueCode:     uniqueCode,
+		Status:         "pending",
+		PaymentMethod:  req.PaymentMethod,
+		CreatedAt:      time.Now(),
 	}
 
 	// Process Payment (Simulate Gateway)
@@ -353,6 +445,11 @@ func GetOrderDetail(c *gin.Context) {
 					return
 				}
 			}
+		} else {
+			if order.UserID != nil {
+				c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "Please login to view this order"})
+				return
+			}
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "data": order})
 		return
@@ -397,6 +494,11 @@ func GetOrderTickets(c *gin.Context) {
 					c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "You are not authorized to view these tickets"})
 					return
 				}
+			}
+		} else {
+			if order.UserID != nil {
+				c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "Please login to view these tickets"})
+				return
 			}
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "data": order.Tickets})

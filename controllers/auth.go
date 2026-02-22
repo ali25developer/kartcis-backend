@@ -188,16 +188,23 @@ func UpdateProfile(c *gin.Context) {
 	userID, _ := c.Get("userID") // From middleware
 
 	var input struct {
-		Name            string `json:"name"`
-		Email           string `json:"email"` // If email update is allowed (might check uniqueness)
-		Phone           string `json:"phone"`
-		Password        string `json:"password"` // Optional: For password change
-		PasswordConfirm string `json:"password_confirm"`
+		Name                 string `json:"name"`
+		Email                string `json:"email"` // If email update is allowed (might check uniqueness)
+		Phone                string `json:"phone"`
+		Password             string `json:"password"` // Optional: For password change
+		PasswordConfirm      string `json:"password_confirm"`
+		PasswordConfirmation string `json:"password_confirmation"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
 		return
+	}
+
+	// Support both naming conventions
+	pConfirm := input.PasswordConfirm
+	if pConfirm == "" {
+		pConfirm = input.PasswordConfirmation
 	}
 
 	var user models.User
@@ -226,7 +233,7 @@ func UpdateProfile(c *gin.Context) {
 
 	// Update Password (if provided)
 	if input.Password != "" {
-		if input.Password != input.PasswordConfirm {
+		if input.Password != pConfirm {
 			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Passwords do not match"})
 			return
 		}

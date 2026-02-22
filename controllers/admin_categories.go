@@ -149,6 +149,11 @@ func UpdateCategory(c *gin.Context) {
 		return
 	}
 
+	// Auto-generate slug if missing
+	if input.Slug == "" {
+		input.Slug = generateCategorySlug(input.Name)
+	}
+
 	// Update fields
 	category.Name = input.Name
 	category.Slug = input.Slug
@@ -160,6 +165,10 @@ func UpdateCategory(c *gin.Context) {
 	category.UpdatedAt = time.Now()
 
 	if err := config.DB.Save(&category).Error; err != nil {
+		if strings.Contains(err.Error(), "23505") || strings.Contains(err.Error(), "duplicate key value") {
+			c.JSON(http.StatusConflict, gin.H{"success": false, "message": "Nama atau slug kategori sudah digunakan. Silakan gunakan nama lain.", "error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Failed to update category", "error": err.Error()})
 		return
 	}
