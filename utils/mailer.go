@@ -341,7 +341,7 @@ func formatImageURL(imagePath string) string {
 		if frontendURL != "" {
 			baseURL = strings.Replace(frontendURL, "5173", "8000", 1)
 		} else {
-			baseURL = "http://localhost:8000"
+			baseURL = "https://kartcis.id"
 		}
 	}
 
@@ -568,7 +568,7 @@ func SendResetPasswordEmail(email, name, token string) {
 	// Construct Link
 	frontendURL := os.Getenv("FRONTEND_URL")
 	if frontendURL == "" {
-		frontendURL = "http://localhost:5173"
+		frontendURL = "https://kartcis.id"
 	}
 	resetLink := fmt.Sprintf("%s/reset-password?token=%s&email=%s", frontendURL, token, email)
 
