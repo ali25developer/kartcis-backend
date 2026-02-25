@@ -28,3 +28,7 @@ tmp/
 uploads/
 .env
 kartcis-backend
+
+.env
+.env.*
+!.env.example

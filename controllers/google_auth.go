@@ -23,8 +23,17 @@ var googleOauthConfig *oauth2.Config
 // Init in main or on first call if env vars loaded late
 func getGoogleConfig() *oauth2.Config {
 	if googleOauthConfig == nil {
+		apiURL := os.Getenv("API_URL")
+		if apiURL == "" {
+			apiURL = "http://localhost:8000"
+		}
+		apiPrefix := os.Getenv("API_PREFIX")
+		if apiPrefix == "" {
+			apiPrefix = "/api/v1"
+		}
+
 		googleOauthConfig = &oauth2.Config{
-			RedirectURL:  "http://localhost:8000/api/v1/auth/google/callback",
+			RedirectURL:  fmt.Sprintf("%s%s/auth/google/callback", apiURL, apiPrefix),
 			ClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
 			ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
 			Scopes:       []string{"https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile"},

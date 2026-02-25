@@ -36,6 +36,9 @@ func UploadFile(c *gin.Context) {
 		return
 	}
 
+	// Ensure the file is readable by others (Nginx, etc.) in production
+	os.Chmod(dst, 0644)
+
 	// Generate URL
 	// Assuming API_BASE_URL env or constructed from host
 	// For simple setup: /api/v1/uploads/filename if static route is set
