@@ -124,26 +124,107 @@ func CreateOrder(c *gin.Context) {
 			return
 		}
 
-		if ticketType.Available < item.Quantity {
-			tx.Rollback()
-			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": fmt.Sprintf("Not enough quota for %s", ticketType.Name)})
-			return
+		// --- FLASH SALE MODULE ---
+		// Determine active price: default to normal ticket price
+		activePrice := ticketType.Price
+		isFlashSaleContext := false
+
+		var flashSale models.FlashSale
+		now := time.Now()
+		currentDay := int(now.Weekday()) // 0=Sun, 1=Mon...
+		if currentDay == 0 {
+			currentDay = 7 // Make Sunday 7 (Optional depending on mapping, let's keep it simple: "0" inside "0,1,2")
+		} else {
+			// Convert to 1=Mon, 7=Sun standard for our logic if we want, or use string "1" for Mon.
+			// Let's use standard Go: Sunday=0, Monday=1...
 		}
 
-		// Deduct quota atomically
-		if err := tx.Model(&ticketType).
-			Where("available >= ?", item.Quantity).
-			Update("available", gorm.Expr("available - ?", item.Quantity)).Error; err != nil {
-			tx.Rollback()
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to update quota (oversold check)"})
-			return
+		errFlash := tx.Where("ticket_type_id = ? AND is_active = true", ticketType.ID).First(&flashSale).Error
+		if errFlash == nil {
+			// Check if flash sale is valid right now
+			isValidDateRange := true
+			if flashSale.StartDate != nil && now.Before(*flashSale.StartDate) {
+				isValidDateRange = false
+			}
+			// Use end of day for EndDate comparison if needed, but direct comparison is fine if it's precise.
+			if flashSale.EndDate != nil && now.After(*flashSale.EndDate) {
+				isValidDateRange = false
+			}
+
+			// Check Day logic
+			isValidDay := true
+			if flashSale.DaysOfWeek != "" && flashSale.DaysOfWeek != "All" {
+				dayStr := strconv.Itoa(int(now.Weekday())) // "0" to "6"
+				if !strings.Contains(flashSale.DaysOfWeek, dayStr) {
+					isValidDay = false
+				}
+			}
+
+			// Check Time
+			isValidTime := true
+			if flashSale.StartTime != "" && flashSale.EndTime != "" {
+				currentTimeStr := now.Format("15:04")
+				if currentTimeStr < flashSale.StartTime || currentTimeStr >= flashSale.EndTime {
+					isValidTime = false
+				}
+			}
+
+			if isValidDateRange && isValidDay && isValidTime {
+				// Flash sale is active, check quota
+				availableFlashQuota := flashSale.Quota - flashSale.Sold
+				if availableFlashQuota >= item.Quantity {
+					isFlashSaleContext = true
+					activePrice = flashSale.FlashPrice
+				} else if availableFlashQuota > 0 {
+					// Edge case: Partially available flash sale
+					tx.Rollback()
+					c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": fmt.Sprintf("Kuota Flash Sale sisa %d, mengurangi pesanan Anda.", availableFlashQuota)})
+					return
+				}
+			}
+		}
+
+		if !isFlashSaleContext {
+			// Normal Ticketing Validation (Non-Flash Sale)
+			if ticketType.Available < item.Quantity {
+				tx.Rollback()
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": fmt.Sprintf("Not enough quota for %s", ticketType.Name)})
+				return
+			}
+
+			// Deduct normal quota atomically
+			if err := tx.Model(&ticketType).
+				Where("available >= ?", item.Quantity).
+				Update("available", gorm.Expr("available - ?", item.Quantity)).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to update quota (oversold check)"})
+				return
+			}
+		} else {
+			// Deduct flash sale quota
+			if err := tx.Model(&flashSale).
+				Where("quota - sold >= ?", item.Quantity). // Extra safe check
+				Update("sold", gorm.Expr("sold + ?", item.Quantity)).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to update flash sale quota"})
+				return
+			}
+			// Optionally: still deduct event overall quota if needed?
+			// Usually Flash Sale Quota is a subset of Total Quota. Let's deduct both.
+			if err := tx.Model(&ticketType).
+				Where("available >= ?", item.Quantity).
+				Update("available", gorm.Expr("available - ?", item.Quantity)).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to update master quota"})
+				return
+			}
 		}
 
 		// Refresh from DB to get the new 'available' value for the rest of the logic
 		tx.First(&ticketType, ticketType.ID)
 
-		ticketPrices[ticketType.ID] = ticketType.Price
-		itemSubtotal := ticketType.Price * float64(item.Quantity)
+		ticketPrices[ticketType.ID] = activePrice
+		itemSubtotal := activePrice * float64(item.Quantity)
 		totalAmount += itemSubtotal
 
 		// Calculate Admin Fee for this item based on Event settings

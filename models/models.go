@@ -210,3 +210,22 @@ type PasswordReset struct {
 	ExpiresAt time.Time `json:"expires_at"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+type FlashSale struct {
+	ID           uint       `gorm:"primaryKey" json:"id"`
+	EventID      uint       `json:"event_id"`
+	Event        Event      `json:"event" gorm:"foreignKey:EventID"`
+	TicketTypeID uint       `json:"ticket_type_id"`
+	TicketType   TicketType `json:"ticket_type" gorm:"foreignKey:TicketTypeID"`
+	FlashPrice   float64    `json:"flash_price"`
+	Quota        int        `json:"quota"`
+	Sold         int        `json:"sold" gorm:"default:0"`
+	StartDate    *time.Time `json:"start_date"`   // Optional: Specific date
+	EndDate      *time.Time `json:"end_date"`     // Optional: Specific date
+	StartTime    string     `json:"start_time"`   // HH:MM "14:00"
+	EndTime      string     `json:"end_time"`     // HH:MM "16:00"
+	DaysOfWeek   string     `json:"days_of_week"` // CSV of days e.g., "1,2,3" (1=Monday) or "All"
+	IsActive     bool       `json:"is_active" gorm:"default:true"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
