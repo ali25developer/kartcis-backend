@@ -207,16 +207,72 @@ func ResendTicketEmail(c *gin.Context) {
 }
 
 func ExportTransactions(c *gin.Context) {
-	var orders []models.Order
-	config.DB.Find(&orders)
+	role, _ := c.Get("userRole")
+	userID, _ := c.Get("userID")
+	eventID := c.Query("event_id")
 
-	// Simple CSV generation
-	csvContent := "ID,OrderNumber,CustomerName,Amount,Status,Date\n"
-	for _, o := range orders {
-		csvContent += fmt.Sprintf("%d,%s,%s,%.2f,%s,%s\n", o.ID, o.OrderNumber, o.CustomerName, o.TotalAmount, o.Status, o.CreatedAt.Format("2006-01-02"))
+	// Filter Transactions based on Role and Event ID
+	query := config.DB.Table("orders").
+		Select("orders.id as order_id, orders.order_number, orders.customer_name, orders.customer_email, orders.customer_phone, orders.status, orders.total_amount, orders.created_at, tickets.ticket_code, tickets.attendee_name, tickets.attendee_email, tickets.attendee_phone, ticket_types.name as ticket_name, events.title as event_title").
+		Joins("LEFT JOIN tickets ON tickets.order_id = orders.id").
+		Joins("LEFT JOIN ticket_types ON ticket_types.id = tickets.ticket_type_id").
+		Joins("LEFT JOIN events ON events.id = tickets.event_id").
+		Where("orders.status != ?", "") // Dummy condition
+
+	if role == "organizer" {
+		query = query.Where("events.organizer_id = ?", userID)
+	}
+	if eventID != "" {
+		query = query.Where("events.id = ?", eventID)
 	}
 
-	c.Header("Content-Disposition", "attachment; filename=transactions.csv")
+	type ExportResult struct {
+		OrderNumber   string
+		CustomerName  string
+		CustomerEmail string
+		CustomerPhone string
+		Status        string
+		TotalAmount   float64
+		CreatedAt     time.Time
+		TicketCode    string
+		AttendeeName  string
+		AttendeeEmail string
+		AttendeePhone string
+		TicketName    string
+		EventTitle    string
+	}
+	var results []ExportResult
+	if err := query.Order("orders.created_at desc").Scan(&results).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to fetch data for export"})
+		return
+	}
+
+	// Simple CSV generation
+	csvContent := "Order Number,Waktu Pembelian,Status,Nama Pemesan,Email Pemesan,No Telepon Pemesan,Data Tiket (Tipe),Kode Tiket,Nama Pengunjung (Attendee),Email Pengunjung,Telepon Pengunjung\n"
+	for _, res := range results {
+		// Escape simple characters if needed, but for MVP standard string format is okay.
+		csvContent += fmt.Sprintf(`"%s","%s","%s","%s","%s","%s","%s - %s","%s","%s","%s","%s"`+"\n",
+			res.OrderNumber,
+			res.CreatedAt.Format("2006-01-02 15:04"),
+			res.Status,
+			res.CustomerName,
+			res.CustomerEmail,
+			res.CustomerPhone,
+			res.EventTitle,
+			res.TicketName,
+			res.TicketCode,
+			res.AttendeeName,
+			res.AttendeeEmail,
+			res.AttendeePhone,
+		)
+	}
+
+	filename := "transactions_export.csv"
+	if eventID != "" {
+		filename = fmt.Sprintf("attendees_event_%s.csv", eventID)
+	}
+
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
 	c.Data(http.StatusOK, "text/csv", []byte(csvContent))
 }
 
