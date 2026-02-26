@@ -136,6 +136,12 @@ func SetupRouter() *gin.Engine {
 		admin.DELETE("/vouchers/:id", controllers.DeleteVoucher)
 		admin.PATCH("/vouchers/:id/status", controllers.UpdateVoucherStatus)
 
+		// Flash Sales (Scoped)
+		admin.GET("/flash-sales", controllers.GetFlashSales)
+		admin.POST("/flash-sales", controllers.CreateFlashSale)
+		admin.PUT("/flash-sales/:id", controllers.UpdateFlashSale)
+		admin.DELETE("/flash-sales/:id", controllers.DeleteFlashSale)
+
 		// Dashboard (Scoped)
 		admin.GET("/stats", controllers.AdminGetStats)
 		admin.GET("/dashboard/revenue", controllers.AdminGetRevenueChart)
