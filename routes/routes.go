@@ -92,6 +92,9 @@ func SetupRouter() *gin.Engine {
 	v1.GET("/orders/:order_number/tickets", middleware.OptionalAuthMiddleware(), controllers.GetOrderTickets)
 	v1.POST("/orders/:order_number/cancel", controllers.UserCancelOrder)
 
+	// User/Public Uploads (For Custom Field Attachments like Student ID)
+	v1.POST("/upload", controllers.UploadFile)
+
 	userOrders.Use(middleware.AuthMiddleware())
 	{
 		userOrders.GET("", controllers.GetUserOrders)
