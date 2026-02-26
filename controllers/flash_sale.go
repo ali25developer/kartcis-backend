@@ -58,7 +58,7 @@ func CreateFlashSale(c *gin.Context) {
 	}
 
 	if err := config.DB.Create(&flashSale).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to create flash sale"})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to create flash sale: " + err.Error()})
 		return
 	}
 
