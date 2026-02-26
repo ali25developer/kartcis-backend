@@ -51,10 +51,15 @@ func UploadFile(c *gin.Context) {
 	// Assuming API_BASE_URL env or constructed from host
 	// For simple setup: /api/v1/uploads/filename if static route is set
 	scheme := "http"
-	if c.Request.TLS != nil {
+	if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
 		scheme = "https"
 	}
 	baseURL := fmt.Sprintf("%s://%s", scheme, c.Request.Host)
+
+	// If there's an explicit API_URL in the .env, use it as the base
+	if envAPIURL := os.Getenv("API_URL"); envAPIURL != "" {
+		baseURL = envAPIURL
+	}
 
 	// Check route prefix
 	apiPrefix := os.Getenv("API_PREFIX")
@@ -64,7 +69,13 @@ func UploadFile(c *gin.Context) {
 
 	// static route is defined as v1.Static("/uploads", ...)
 	// So URL is baseURL + apiPrefix + "/uploads/" + filename
+	// Example: http://kartcis.id/api/v1/uploads/filename
 	fileURL := fmt.Sprintf("%s%s/uploads/%s", baseURL, apiPrefix, filename)
+
+	// If the constructed base URL already ends with /api/v1, adjust it so we don't duplicate
+	if strings.HasSuffix(baseURL, apiPrefix) {
+		fileURL = fmt.Sprintf("%s/uploads/%s", baseURL, filename)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
