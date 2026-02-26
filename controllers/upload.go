@@ -31,13 +31,21 @@ func UploadFile(c *gin.Context) {
 	filename := fmt.Sprintf("%d-%s%s", time.Now().Unix(), uuid.New().String(), ext)
 	dst := filepath.Join("uploads", filename)
 
+	// Ensure directory exists
+	if err := os.MkdirAll("uploads", 0755); err != nil {
+		fmt.Printf("Warning: failed to create uploads directory: %v\n", err)
+	}
+
 	if err := c.SaveUploadedFile(file, dst); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to save file"})
+		fmt.Printf("Upload fails on SaveUploadedFile: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": fmt.Sprintf("Failed to save file: %v", err)})
 		return
 	}
 
 	// Ensure the file is readable by others (Nginx, etc.) in production
-	os.Chmod(dst, 0644)
+	if err := os.Chmod(dst, 0644); err != nil {
+		fmt.Printf("Warning: failed to chmod file %s: %v\n", dst, err)
+	}
 
 	// Generate URL
 	// Assuming API_BASE_URL env or constructed from host

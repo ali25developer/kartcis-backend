@@ -18,6 +18,14 @@ func main() {
 	jobs.StartPaymentCheckerJob()
 	jobs.StartEventExpiryJob()
 
+	// Ensure uploads directory exists and has public read access for Nginx
+	if err := os.MkdirAll("uploads", 0755); err != nil {
+		fmt.Printf("Warning: failed to mkdki uploads: %v\n", err)
+	}
+	if err := os.Chmod("uploads", 0755); err != nil {
+		fmt.Printf("Warning: failed to chmod uploads: %v\n", err)
+	}
+
 	// Setup Router
 	r := routes.SetupRouter()
 
