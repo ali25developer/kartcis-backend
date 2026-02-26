@@ -124,6 +124,20 @@ func CreateOrder(c *gin.Context) {
 			return
 		}
 
+		// Flash Sale / Schedule Logic
+		now := time.Now()
+		if ticketType.SaleStart != nil && now.Before(*ticketType.SaleStart) {
+			tx.Rollback()
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": fmt.Sprintf("Penjualan tiket '%s' belum dimulai.", ticketType.Name)})
+			return
+		}
+
+		if ticketType.SaleEnd != nil && now.After(*ticketType.SaleEnd) {
+			tx.Rollback()
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": fmt.Sprintf("Penjualan tiket '%s' sudah ditutup.", ticketType.Name)})
+			return
+		}
+
 		if ticketType.Available < item.Quantity {
 			tx.Rollback()
 			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": fmt.Sprintf("Not enough quota for %s", ticketType.Name)})
