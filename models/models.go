@@ -102,20 +102,18 @@ type Event struct {
 }
 
 type TicketType struct {
-	ID            uint       `gorm:"primaryKey" json:"id"`
-	EventID       uint       `json:"event_id"`
-	Event         Event      `json:"event" gorm:"foreignKey:EventID"`
-	Name          string     `json:"name"`
-	Description   string     `json:"description"`
-	Price         float64    `json:"price"`
-	OriginalPrice float64    `json:"original_price"`
-	Quota         int        `json:"quota"`
-	Available     int        `json:"available"`
-	Sold          int        `json:"sold" gorm:"-"` // Virtual field: Quota - Available
-	SaleStart     *time.Time `json:"sale_start"`    // For flash sales / scheduled ticketing
-	SaleEnd       *time.Time `json:"sale_end"`      // For flash sales / scheduled ticketing
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	EventID       uint      `json:"event_id"`
+	Event         Event     `json:"event" gorm:"foreignKey:EventID"`
+	Name          string    `json:"name"`
+	Description   string    `json:"description"`
+	Price         float64   `json:"price"`
+	OriginalPrice float64   `json:"original_price"`
+	Quota         int       `json:"quota"`
+	Available     int       `json:"available"`
+	Sold          int       `json:"sold" gorm:"-"` // Virtual field: Quota - Available
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // Hooks to calculate Sold field
