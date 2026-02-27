@@ -94,6 +94,7 @@ func SetupRouter() *gin.Engine {
 
 	// User/Public Uploads (For Custom Field Attachments like Student ID)
 	v1.POST("/upload", controllers.UploadFile)
+	v1.GET("/flash-sales", controllers.GetFlashSales) // Added for public viewing during checkout
 
 	userOrders.Use(middleware.AuthMiddleware())
 	{
