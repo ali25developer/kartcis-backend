@@ -13,11 +13,9 @@ type FlashSaleRequest struct {
 	TicketTypeID uint    `json:"ticket_type_id" binding:"required"`
 	FlashPrice   float64 `json:"flash_price" binding:"required"`
 	Quota        int     `json:"quota" binding:"required"`
-	StartDate    string  `json:"start_date"`   // YYYY-MM-DD
-	EndDate      string  `json:"end_date"`     // YYYY-MM-DD
-	StartTime    string  `json:"start_time"`   // HH:MM
-	EndTime      string  `json:"end_time"`     // HH:MM
-	DaysOfWeek   string  `json:"days_of_week"` // e.g., "1,2,3"
+	FlashDate    string  `json:"flash_date"` // YYYY-MM-DD
+	StartTime    string  `json:"start_time"` // HH:MM
+	EndTime      string  `json:"end_time"`   // HH:MM
 	IsActive     *bool   `json:"is_active"`
 }
 
@@ -40,20 +38,13 @@ func CreateFlashSale(c *gin.Context) {
 		Quota:        req.Quota,
 		StartTime:    req.StartTime,
 		EndTime:      req.EndTime,
-		DaysOfWeek:   req.DaysOfWeek,
 		IsActive:     isActive,
 	}
 
-	if req.StartDate != "" {
-		sd, err := parseEventDate(req.StartDate)
+	if req.FlashDate != "" {
+		fd, err := parseEventDate(req.FlashDate)
 		if err == nil {
-			flashSale.StartDate = &sd
-		}
-	}
-	if req.EndDate != "" {
-		ed, err := parseEventDate(req.EndDate)
-		if err == nil {
-			flashSale.EndDate = &ed
+			flashSale.FlashDate = &fd
 		}
 	}
 
@@ -94,23 +85,18 @@ func UpdateFlashSale(c *gin.Context) {
 	}
 
 	updates := map[string]interface{}{
-		"flash_price":  req.FlashPrice,
-		"quota":        req.Quota,
-		"start_time":   req.StartTime,
-		"end_time":     req.EndTime,
-		"days_of_week": req.DaysOfWeek,
+		"flash_price": req.FlashPrice,
+		"quota":       req.Quota,
+		"start_time":  req.StartTime,
+		"end_time":    req.EndTime,
 	}
 
 	if req.IsActive != nil {
 		updates["is_active"] = *req.IsActive
 	}
-	if req.StartDate != "" {
-		sd, _ := parseEventDate(req.StartDate)
-		updates["start_date"] = sd
-	}
-	if req.EndDate != "" {
-		ed, _ := parseEventDate(req.EndDate)
-		updates["end_date"] = ed
+	if req.FlashDate != "" {
+		fd, _ := parseEventDate(req.FlashDate)
+		updates["flash_date"] = fd
 	}
 
 	config.DB.Model(&flashSale).Updates(updates)

@@ -220,11 +220,9 @@ type FlashSale struct {
 	FlashPrice   float64    `json:"flash_price"`
 	Quota        int        `json:"quota"`
 	Sold         int        `json:"sold" gorm:"default:0"`
-	StartDate    *time.Time `json:"start_date"`   // Optional: Specific date
-	EndDate      *time.Time `json:"end_date"`     // Optional: Specific date
-	StartTime    string     `json:"start_time"`   // HH:MM "14:00"
-	EndTime      string     `json:"end_time"`     // HH:MM "16:00"
-	DaysOfWeek   string     `json:"days_of_week"` // CSV of days e.g., "1,2,3" (1=Monday) or "All"
+	FlashDate    *time.Time `json:"flash_date"` // Specific date for the flash sale
+	StartTime    string     `json:"start_time"` // HH:MM "10:00"
+	EndTime      string     `json:"end_time"`   // HH:MM "14:00"
 	IsActive     bool       `json:"is_active" gorm:"default:true"`
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`

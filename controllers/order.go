@@ -142,22 +142,18 @@ func CreateOrder(c *gin.Context) {
 		errFlash := tx.Where("ticket_type_id = ? AND is_active = true", ticketType.ID).First(&flashSale).Error
 		if errFlash == nil {
 			// Check if flash sale is valid right now
-			isValidDateRange := true
-			if flashSale.StartDate != nil && now.Before(*flashSale.StartDate) {
-				isValidDateRange = false
-			}
-			// Use end of day for EndDate comparison if needed, but direct comparison is fine if it's precise.
-			if flashSale.EndDate != nil && now.After(*flashSale.EndDate) {
-				isValidDateRange = false
-			}
-
-			// Check Day logic
-			isValidDay := true
-			if flashSale.DaysOfWeek != "" && flashSale.DaysOfWeek != "All" {
-				dayStr := strconv.Itoa(int(now.Weekday())) // "0" to "6"
-				if !strings.Contains(flashSale.DaysOfWeek, dayStr) {
-					isValidDay = false
+			isValidDate := true
+			if flashSale.FlashDate != nil {
+				// Compare Year, Month, Day
+				sy, sm, sd := flashSale.FlashDate.Date()
+				ny, nm, nd := now.Date()
+				if sy != ny || sm != nm || sd != nd {
+					isValidDate = false
 				}
+			} else {
+				// If no date is set, maybe it's "every day"?
+				// But user said "1 flash sale 1 tanggal". Let's assume date is required for this to trigger.
+				isValidDate = false
 			}
 
 			// Check Time
@@ -169,7 +165,7 @@ func CreateOrder(c *gin.Context) {
 				}
 			}
 
-			if isValidDateRange && isValidDay && isValidTime {
+			if isValidDate && isValidTime {
 				// Flash sale is active, check quota
 				availableFlashQuota := flashSale.Quota - flashSale.Sold
 				if availableFlashQuota >= item.Quantity {

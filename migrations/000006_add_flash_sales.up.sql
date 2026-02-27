@@ -5,11 +5,9 @@ CREATE TABLE IF NOT EXISTS flash_sales (
     flash_price NUMERIC(10,2) NOT NULL,
     quota INTEGER NOT NULL DEFAULT 0,
     sold INTEGER NOT NULL DEFAULT 0,
-    start_date TIMESTAMP WITH TIME ZONE,
-    end_date TIMESTAMP WITH TIME ZONE,
+    flash_date DATE,
     start_time VARCHAR(5),
     end_time VARCHAR(5),
-    days_of_week VARCHAR(255),
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
