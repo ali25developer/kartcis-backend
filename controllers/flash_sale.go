@@ -53,6 +53,9 @@ func CreateFlashSale(c *gin.Context) {
 		return
 	}
 
+	// Preload the relations so the response is not empty
+	config.DB.Preload("Event").Preload("TicketType").First(&flashSale, flashSale.ID)
+
 	c.JSON(http.StatusCreated, gin.H{"success": true, "data": flashSale})
 }
 
