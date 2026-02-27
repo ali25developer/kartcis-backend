@@ -63,7 +63,7 @@ func GetFlashSales(c *gin.Context) {
 	eventId := c.Query("event_id")
 	var sales []models.FlashSale
 
-	query := config.DB.Preload("TicketType")
+	query := config.DB.Preload("Event").Preload("TicketType")
 	if eventId != "" {
 		query = query.Where("event_id = ?", eventId)
 	}
