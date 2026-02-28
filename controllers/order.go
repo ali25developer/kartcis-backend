@@ -131,7 +131,10 @@ func CreateOrder(c *gin.Context) {
 
 		var activeFlashSales []models.FlashSale
 		var flashSale *models.FlashSale
-		now := time.Now()
+
+		// Load Timezone WIB (Asia/Jakarta) agar sinkron dengan database
+		loc, _ := time.LoadLocation("Asia/Jakarta")
+		now := time.Now().In(loc)
 
 		errFlash := tx.Where("ticket_type_id = ? AND is_active = true", ticketType.ID).Find(&activeFlashSales).Error
 		if errFlash == nil && len(activeFlashSales) > 0 {
