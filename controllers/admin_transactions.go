@@ -27,15 +27,45 @@ func AdminGetTransactions(c *gin.Context) {
 		query = query.Where("orders.status = ?", status)
 	}
 
-	// Search filter
-	// Filters
+	// Global Filters
+	eventID := c.Query("event_id")
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
+
+	startStr, endStr := "", ""
+	if startDate != "" {
+		startStr = startDate + " 00:00:00"
+	}
+	if endDate != "" {
+		endStr = endDate + " 23:59:59"
+	}
+
 	role, _ := c.Get("userRole")
-	if role == "organizer" {
-		userID, _ := c.Get("userID")
-		query = query.Joins("JOIN tickets ON tickets.order_id = orders.id").
-			Joins("JOIN events ON events.id = tickets.event_id").
-			Where("events.organizer_id = ?", userID).
-			Group("orders.id")
+
+	// If organizer, or if global admin explicitly filtering by event, we need the join
+	if role == "organizer" || eventID != "" {
+		query = query.Joins("JOIN tickets ON tickets.order_id = orders.id")
+
+		if role == "organizer" {
+			userID, _ := c.Get("userID")
+			query = query.Joins("JOIN events ON events.id = tickets.event_id").
+				Where("events.organizer_id = ?", userID)
+		}
+
+		if eventID != "" {
+			query = query.Where("tickets.event_id = ?", eventID)
+		}
+
+		// To prevent duplicate orders when joining tickets
+		query = query.Group("orders.id")
+	}
+
+	// Apply Date Filters
+	if startStr != "" {
+		query = query.Where("orders.created_at >= ?", startStr)
+	}
+	if endStr != "" {
+		query = query.Where("orders.created_at <= ?", endStr)
 	}
 
 	search := c.Query("search")
