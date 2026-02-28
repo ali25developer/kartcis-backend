@@ -189,29 +189,51 @@ func CreateOrder(c *gin.Context) {
 			}
 
 			// Deduct normal quota atomically
-			if err := tx.Model(&ticketType).
+			res := tx.Model(&ticketType).
 				Where("available >= ?", item.Quantity).
-				Update("available", gorm.Expr("available - ?", item.Quantity)).Error; err != nil {
+				Update("available", gorm.Expr("available - ?", item.Quantity))
+
+			if err := res.Error; err != nil {
 				tx.Rollback()
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to update quota (oversold check)"})
 				return
 			}
+			if res.RowsAffected == 0 {
+				tx.Rollback()
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": fmt.Sprintf("Mohon maaf, tiket '%s' baru saja habis terjual atau kuota tidak cukup.", ticketType.Name)})
+				return
+			}
 		} else {
 			// Deduct flash sale quota
-			if err := tx.Model(&flashSale).
+			resFlash := tx.Model(&flashSale).
 				Where("quota - sold >= ?", item.Quantity). // Extra safe check
-				Update("sold", gorm.Expr("sold + ?", item.Quantity)).Error; err != nil {
+				Update("sold", gorm.Expr("sold + ?", item.Quantity))
+
+			if err := resFlash.Error; err != nil {
 				tx.Rollback()
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to update flash sale quota"})
 				return
 			}
+			if resFlash.RowsAffected == 0 {
+				tx.Rollback()
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Mohon maaf, kuota Flash Sale sudah habis atau tidak mencukupi."})
+				return
+			}
+
 			// Optionally: still deduct event overall quota if needed?
 			// Usually Flash Sale Quota is a subset of Total Quota. Let's deduct both.
-			if err := tx.Model(&ticketType).
+			resMaster := tx.Model(&ticketType).
 				Where("available >= ?", item.Quantity).
-				Update("available", gorm.Expr("available - ?", item.Quantity)).Error; err != nil {
+				Update("available", gorm.Expr("available - ?", item.Quantity))
+
+			if err := resMaster.Error; err != nil {
 				tx.Rollback()
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to update master quota"})
+				return
+			}
+			if resMaster.RowsAffected == 0 {
+				tx.Rollback()
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": fmt.Sprintf("Mohon maaf, tiket utama '%s' sudah habis.", ticketType.Name)})
 				return
 			}
 		}
