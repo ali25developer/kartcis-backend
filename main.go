@@ -15,7 +15,7 @@ func main() {
 
 	// Start Background Jobs
 	jobs.StartOrderExpiryJob()
-	jobs.StartPaymentCheckerJob()
+	// jobs.StartPaymentCheckerJob()
 	jobs.StartEventExpiryJob()
 
 	// Ensure uploads directory exists and has public read access for Nginx

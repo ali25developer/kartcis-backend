@@ -94,6 +94,10 @@ Quick reference untuk semua endpoints. Untuk detail lengkap, lihat file masing-m
 | GET | `/admin/dashboard/events-overview` | 👑 | Event analytics overview |
 | GET | `/admin/dashboard/users-overview` | 👑 | User analytics |
 
+**Query Parameters (GET /admin/stats):**
+- `event_id` - Filter by specific event
+- `start_date`, `end_date` - Filter by date range (YYYY-MM-DD)
+
 ---
 
 ## 👑 Admin - Events (`/api/v1/admin/events`)

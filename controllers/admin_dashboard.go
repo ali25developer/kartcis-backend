@@ -21,70 +21,255 @@ func AdminGetStats(c *gin.Context) {
 
 	role, _ := c.Get("userRole")
 	userID, _ := c.Get("userID")
+	eventID := c.Query("event_id")
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
+
+	startStr, endStr := "", ""
+	if startDate != "" {
+		startStr = startDate + " 00:00:00"
+	}
+	if endDate != "" {
+		endStr = endDate + " 23:59:59"
+	}
 
 	if role == "organizer" {
 		// Scoped Stats
 		// 1. Total Customers (Users who bought tickets)
-		config.DB.Table("users").
+		queryUsers := config.DB.Table("users").
 			Joins("JOIN orders ON orders.user_id = users.id").
 			Joins("JOIN tickets ON tickets.order_id = orders.id").
 			Joins("JOIN events ON events.id = tickets.event_id").
-			Where("events.organizer_id = ?", userID).
-			Distinct("users.id").Count(&totalUsers)
+			Where("events.organizer_id = ?", userID)
+		if eventID != "" {
+			queryUsers = queryUsers.Where("events.id = ?", eventID)
+		}
+		if startStr != "" {
+			queryUsers = queryUsers.Where("orders.created_at >= ?", startStr)
+		}
+		if endStr != "" {
+			queryUsers = queryUsers.Where("orders.created_at <= ?", endStr)
+		}
+		queryUsers.Distinct("users.id").Count(&totalUsers)
 
 		// 2. Events Owned
-		config.DB.Model(&models.Event{}).Where("organizer_id = ?", userID).Count(&totalEvents)
+		queryEvents := config.DB.Model(&models.Event{}).Where("organizer_id = ?", userID)
+		if eventID != "" {
+			queryEvents = queryEvents.Where("id = ?", eventID)
+		}
+		if startStr != "" {
+			queryEvents = queryEvents.Where("created_at >= ?", startStr)
+		}
+		if endStr != "" {
+			queryEvents = queryEvents.Where("created_at <= ?", endStr)
+		}
+		queryEvents.Count(&totalEvents)
 
 		// 3. Transactions (Orders involving their events)
 		// Note: Orders might duplicate if joined, use distinct order ID counting
-		config.DB.Table("orders").
+		queryOrders := config.DB.Table("orders").
 			Joins("JOIN tickets ON tickets.order_id = orders.id").
 			Joins("JOIN events ON events.id = tickets.event_id").
-			Where("events.organizer_id = ?", userID).
-			Distinct("orders.id").Count(&totalOrders)
+			Where("events.organizer_id = ?", userID)
+		if eventID != "" {
+			queryOrders = queryOrders.Where("events.id = ?", eventID)
+		}
+		if startStr != "" {
+			queryOrders = queryOrders.Where("orders.created_at >= ?", startStr)
+		}
+		if endStr != "" {
+			queryOrders = queryOrders.Where("orders.created_at <= ?", endStr)
+		}
+		queryOrders.Distinct("orders.id").Count(&totalOrders)
 
-		config.DB.Table("orders").
+		queryPaid := config.DB.Table("orders").
 			Joins("JOIN tickets ON tickets.order_id = orders.id").
 			Joins("JOIN events ON events.id = tickets.event_id").
-			Where("events.organizer_id = ? AND orders.status = ?", userID, "paid").
-			Distinct("orders.id").Count(&paidOrders)
+			Where("events.organizer_id = ? AND orders.status = ?", userID, "paid")
+		if eventID != "" {
+			queryPaid = queryPaid.Where("events.id = ?", eventID)
+		}
+		if startStr != "" {
+			queryPaid = queryPaid.Where("orders.created_at >= ?", startStr)
+		}
+		if endStr != "" {
+			queryPaid = queryPaid.Where("orders.created_at <= ?", endStr)
+		}
+		queryPaid.Distinct("orders.id").Count(&paidOrders)
 
-		config.DB.Table("orders").
+		queryPending := config.DB.Table("orders").
 			Joins("JOIN tickets ON tickets.order_id = orders.id").
 			Joins("JOIN events ON events.id = tickets.event_id").
-			Where("events.organizer_id = ? AND orders.status = ?", userID, "pending").
-			Distinct("orders.id").Count(&pendingOrders)
+			Where("events.organizer_id = ? AND orders.status = ?", userID, "pending")
+		if eventID != "" {
+			queryPending = queryPending.Where("events.id = ?", eventID)
+		}
+		if startStr != "" {
+			queryPending = queryPending.Where("orders.created_at >= ?", startStr)
+		}
+		if endStr != "" {
+			queryPending = queryPending.Where("orders.created_at <= ?", endStr)
+		}
+		queryPending.Distinct("orders.id").Count(&pendingOrders)
 
 		// 4. Net Revenue (Sum of THEIR ticket prices MINUS Platform Fee in paid orders)
 		type Result struct {
 			Total float64
 		}
 		var result Result
-		config.DB.Table("tickets").
+		queryRevenue := config.DB.Table("tickets").
 			Joins("JOIN orders ON orders.id = tickets.order_id").
 			Joins("JOIN ticket_types ON ticket_types.id = tickets.ticket_type_id").
 			Joins("JOIN events ON events.id = tickets.event_id").
-			Where("orders.status = ? AND events.organizer_id = ?", "paid", userID).
-			// Formula: Price - (Price * Fee / 100)
-			Select("COALESCE(SUM(ticket_types.price - (ticket_types.price * events.fee_percentage / 100)), 0) as total").
+			Where("orders.status = ? AND events.organizer_id = ?", "paid", userID)
+		if eventID != "" {
+			queryRevenue = queryRevenue.Where("events.id = ?", eventID)
+		}
+		if startStr != "" {
+			queryRevenue = queryRevenue.Where("orders.created_at >= ?", startStr)
+		}
+		if endStr != "" {
+			queryRevenue = queryRevenue.Where("orders.created_at <= ?", endStr)
+		}
+		queryRevenue.Select("COALESCE(SUM(ticket_types.price - (ticket_types.price * events.fee_percentage / 100)), 0) as total").
 			Scan(&result)
 		totalRevenue = result.Total
 
 	} else {
 		// Admin (Global)
-		config.DB.Model(&models.User{}).Count(&totalUsers)
-		config.DB.Model(&models.Event{}).Count(&totalEvents)
-		config.DB.Model(&models.Order{}).Count(&totalOrders)
-		config.DB.Model(&models.Order{}).Where("status = ?", "paid").Count(&paidOrders)
-		config.DB.Model(&models.Order{}).Where("status = ?", "pending").Count(&pendingOrders)
+		if eventID != "" {
+			queryUsers := config.DB.Table("users").
+				Joins("JOIN orders ON orders.user_id = users.id").
+				Joins("JOIN tickets ON tickets.order_id = orders.id").
+				Where("tickets.event_id = ?", eventID)
+			if startStr != "" {
+				queryUsers = queryUsers.Where("orders.created_at >= ?", startStr)
+			}
+			if endStr != "" {
+				queryUsers = queryUsers.Where("orders.created_at <= ?", endStr)
+			}
+			queryUsers.Distinct("users.id").Count(&totalUsers)
 
-		// Calculate revenue (sum of paid orders)
-		type Result struct {
-			Total float64
+			queryEvents := config.DB.Model(&models.Event{}).Where("id = ?", eventID)
+			if startStr != "" {
+				queryEvents = queryEvents.Where("created_at >= ?", startStr)
+			}
+			if endStr != "" {
+				queryEvents = queryEvents.Where("created_at <= ?", endStr)
+			}
+			queryEvents.Count(&totalEvents)
+
+			queryOrders := config.DB.Table("orders").
+				Joins("JOIN tickets ON tickets.order_id = orders.id").
+				Where("tickets.event_id = ?", eventID)
+			if startStr != "" {
+				queryOrders = queryOrders.Where("orders.created_at >= ?", startStr)
+			}
+			if endStr != "" {
+				queryOrders = queryOrders.Where("orders.created_at <= ?", endStr)
+			}
+			queryOrders.Distinct("orders.id").Count(&totalOrders)
+
+			queryPaid := config.DB.Table("orders").
+				Joins("JOIN tickets ON tickets.order_id = orders.id").
+				Where("tickets.event_id = ? AND orders.status = ?", eventID, "paid")
+			if startStr != "" {
+				queryPaid = queryPaid.Where("orders.created_at >= ?", startStr)
+			}
+			if endStr != "" {
+				queryPaid = queryPaid.Where("orders.created_at <= ?", endStr)
+			}
+			queryPaid.Distinct("orders.id").Count(&paidOrders)
+
+			queryPending := config.DB.Table("orders").
+				Joins("JOIN tickets ON tickets.order_id = orders.id").
+				Where("tickets.event_id = ? AND orders.status = ?", eventID, "pending")
+			if startStr != "" {
+				queryPending = queryPending.Where("orders.created_at >= ?", startStr)
+			}
+			if endStr != "" {
+				queryPending = queryPending.Where("orders.created_at <= ?", endStr)
+			}
+			queryPending.Distinct("orders.id").Count(&pendingOrders)
+
+			type Result struct {
+				Total float64
+			}
+			var result Result
+			queryRevenue := config.DB.Table("tickets").
+				Joins("JOIN orders ON orders.id = tickets.order_id").
+				Joins("JOIN ticket_types ON ticket_types.id = tickets.ticket_type_id").
+				Where("orders.status = ? AND tickets.event_id = ?", "paid", eventID)
+			if startStr != "" {
+				queryRevenue = queryRevenue.Where("orders.created_at >= ?", startStr)
+			}
+			if endStr != "" {
+				queryRevenue = queryRevenue.Where("orders.created_at <= ?", endStr)
+			}
+			queryRevenue.Select("COALESCE(SUM(ticket_types.price), 0) as total").
+				Scan(&result)
+			totalRevenue = result.Total
+		} else {
+			queryUsers := config.DB.Model(&models.User{})
+			if startStr != "" {
+				queryUsers = queryUsers.Where("created_at >= ?", startStr)
+			}
+			if endStr != "" {
+				queryUsers = queryUsers.Where("created_at <= ?", endStr)
+			}
+			queryUsers.Count(&totalUsers)
+
+			queryEvents := config.DB.Model(&models.Event{})
+			if startStr != "" {
+				queryEvents = queryEvents.Where("created_at >= ?", startStr)
+			}
+			if endStr != "" {
+				queryEvents = queryEvents.Where("created_at <= ?", endStr)
+			}
+			queryEvents.Count(&totalEvents)
+
+			queryOrders := config.DB.Model(&models.Order{})
+			if startStr != "" {
+				queryOrders = queryOrders.Where("created_at >= ?", startStr)
+			}
+			if endStr != "" {
+				queryOrders = queryOrders.Where("created_at <= ?", endStr)
+			}
+			queryOrders.Count(&totalOrders)
+
+			queryPaid := config.DB.Model(&models.Order{}).Where("status = ?", "paid")
+			if startStr != "" {
+				queryPaid = queryPaid.Where("created_at >= ?", startStr)
+			}
+			if endStr != "" {
+				queryPaid = queryPaid.Where("created_at <= ?", endStr)
+			}
+			queryPaid.Count(&paidOrders)
+
+			queryPending := config.DB.Model(&models.Order{}).Where("status = ?", "pending")
+			if startStr != "" {
+				queryPending = queryPending.Where("created_at >= ?", startStr)
+			}
+			if endStr != "" {
+				queryPending = queryPending.Where("created_at <= ?", endStr)
+			}
+			queryPending.Count(&pendingOrders)
+
+			// Calculate revenue (sum of paid orders)
+			type Result struct {
+				Total float64
+			}
+			var result Result
+			queryRevenue := config.DB.Model(&models.Order{}).Where("status = ?", "paid")
+			if startStr != "" {
+				queryRevenue = queryRevenue.Where("created_at >= ?", startStr)
+			}
+			if endStr != "" {
+				queryRevenue = queryRevenue.Where("created_at <= ?", endStr)
+			}
+			queryRevenue.Select("COALESCE(SUM(total_amount), 0) as total").Scan(&result)
+			totalRevenue = result.Total
 		}
-		var result Result
-		config.DB.Model(&models.Order{}).Where("status = ?", "paid").Select("COALESCE(SUM(total_amount), 0) as total").Scan(&result)
-		totalRevenue = result.Total
 	}
 
 	c.JSON(http.StatusOK, gin.H{

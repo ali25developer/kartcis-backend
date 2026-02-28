@@ -15,6 +15,11 @@ Authorization: Bearer {admin_token}
 
 **Endpoint:** `GET /admin/stats`
 
+**Query Parameters (Optional):**
+- `event_id` (integer) - Filter stats specific to an event
+- `start_date` (date) - YYYY-MM-DD (Filter based on order/event creation)
+- `end_date` (date) - YYYY-MM-DD (Filter based on order/event creation)
+
 **Response Success (200):**
 ```json
 {
