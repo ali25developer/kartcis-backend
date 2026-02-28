@@ -20,8 +20,11 @@ Authorization: Bearer {admin_token}
 - `limit` (int) - Default: 20
 - `search` (string) - Search by order_number, customer_name, customer_email, event_title
 - `status` (string) - Filter: all/pending/paid/cancelled/expired
-- `date_from` (date) - YYYY-MM-DD
-- `date_to` (date) - YYYY-MM-DD
+- `event_id` (int) - Filter by specific event ID
+- `start_date` (date) - Filter by start date (YYYY-MM-DD)
+- `end_date` (date) - Filter by end date (YYYY-MM-DD)
+- `date_from` (date) - YYYY-MM-DD (Alternate format)
+- `date_to` (date) - YYYY-MM-DD (Alternate format)
 - `sort` (string) - newest/oldest/amount_asc/amount_desc
 
 **Response Success (200):**

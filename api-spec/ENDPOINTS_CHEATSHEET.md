@@ -155,9 +155,11 @@ Quick reference untuk semua endpoints. Untuk detail lengkap, lihat file masing-m
 
 **Query Parameters (GET /admin/transactions):**
 - `page`, `limit` - Pagination
-- `search` - Search by order_number/customer/event
+- `search` - Search by order_number/customer_email/customer_name
 - `status` - Filter: all/pending/paid/cancelled/expired
-- `date_from`, `date_to` - Date range
+- `event_id` - Filter by specific event
+- `start_date`, `end_date` - Filter by date range (YYYY-MM-DD)
+- `date_from`, `date_to` - Filter by date range (Alternate style)
 - `sort` - newest/oldest/amount_asc/amount_desc
 
 ---
