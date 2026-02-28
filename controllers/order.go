@@ -142,6 +142,7 @@ func CreateOrder(c *gin.Context) {
 			currentTimeStr := now.Format("15:04")
 
 			// Temukan 1 Flash Sale yang sedang aktif secara waktu persis saat ini
+			// Temukan Harga Termurah dari seluruh Flash Sale yang sedang aktif saat ini
 			for i := range activeFlashSales {
 				fs := activeFlashSales[i]
 				if fs.FlashDate != nil {
@@ -149,8 +150,10 @@ func CreateOrder(c *gin.Context) {
 					if sy == ny && sm == nm && sd == nd {
 						if fs.StartTime != "" && fs.EndTime != "" {
 							if currentTimeStr >= fs.StartTime && currentTimeStr < fs.EndTime {
-								flashSale = &fs
-								break
+								// Pilih yang harganya paling murah jika ada jadwal bentrok
+								if flashSale == nil || fs.FlashPrice < flashSale.FlashPrice {
+									flashSale = &activeFlashSales[i]
+								}
 							}
 						}
 					}
