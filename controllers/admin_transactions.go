@@ -40,7 +40,7 @@ func AdminGetTransactions(c *gin.Context) {
 
 	search := c.Query("search")
 	if search != "" {
-		query = query.Where("orders.order_number ILIKE ? OR orders.customer_email ILIKE ?", "%"+search+"%", "%"+search+"%")
+		query = query.Where("orders.order_number ILIKE ? OR orders.customer_email ILIKE ? OR orders.customer_name ILIKE ?", "%"+search+"%", "%"+search+"%", "%"+search+"%")
 	}
 
 	// Count Total
