@@ -393,14 +393,13 @@ func CreateOrder(c *gin.Context) {
 		// Generate unique code and ensure TOTAL AMOUNT is unique for pending orders
 		baseAmount := totalAmount + totalAdminFee - discountAmount
 
-		// 1. Get ALL currently used codes for this amount
+		// 1. Get ALL codes used in the last 3 hours (regardless of status)
+		// This creates a 'cooldown' so the same amount isn't reused too quickly,
+		// preventing the payment scraper from getting confused.
 		var usedCodes []int
-		// We query just the UniqueCode column for pending orders where (TotalAmount - UniqueCode) is approx BaseAmount
-		// To be safe and DB agnostic about float precision logic, we can query by range or just select unique_code
-		// where status='pending' AND ABS(total_amount - unique_code - baseAmount) < 1.0
-
+		threeHoursAgo := time.Now().Add(-3 * time.Hour)
 		tx.Model(&models.Order{}).
-			Where("status = ? AND total_amount >= ? AND total_amount <= ?", "pending", baseAmount+101, baseAmount+999).
+			Where("created_at >= ? AND total_amount >= ? AND total_amount <= ?", threeHoursAgo, baseAmount+101, baseAmount+999).
 			Pluck("unique_code", &usedCodes)
 
 		// 2. Check Capacity
