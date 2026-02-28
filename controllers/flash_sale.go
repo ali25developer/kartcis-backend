@@ -19,6 +19,15 @@ type FlashSaleRequest struct {
 	IsActive     *bool   `json:"is_active"`
 }
 
+type UpdateFlashSaleRequest struct {
+	FlashPrice *float64 `json:"flash_price"`
+	Quota      *int     `json:"quota"`
+	FlashDate  string   `json:"flash_date"` // YYYY-MM-DD
+	StartTime  string   `json:"start_time"` // HH:MM
+	EndTime    string   `json:"end_time"`   // HH:MM
+	IsActive   *bool    `json:"is_active"`
+}
+
 func CreateFlashSale(c *gin.Context) {
 	var req FlashSaleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -81,19 +90,26 @@ func UpdateFlashSale(c *gin.Context) {
 		return
 	}
 
-	var req FlashSaleRequest
+	var req UpdateFlashSaleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid input"})
 		return
 	}
 
-	updates := map[string]interface{}{
-		"flash_price": req.FlashPrice,
-		"quota":       req.Quota,
-		"start_time":  req.StartTime,
-		"end_time":    req.EndTime,
-	}
+	updates := map[string]interface{}{}
 
+	if req.FlashPrice != nil {
+		updates["flash_price"] = *req.FlashPrice
+	}
+	if req.Quota != nil {
+		updates["quota"] = *req.Quota
+	}
+	if req.StartTime != "" {
+		updates["start_time"] = req.StartTime
+	}
+	if req.EndTime != "" {
+		updates["end_time"] = req.EndTime
+	}
 	if req.IsActive != nil {
 		updates["is_active"] = *req.IsActive
 	}
