@@ -5,6 +5,7 @@ services:
     image: postgres:15-alpine
     container_name: kartcis-db
     environment:
+      TZ: "Asia/Jakarta"
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
       POSTGRES_DB: ${POSTGRES_DB:-kartcis}
@@ -28,6 +29,7 @@ services:
     volumes:
       - ./uploads:/app/uploads:z
     environment:
+      - TZ=Asia/Jakarta
       - DATABASE_URL=host=db user=${POSTGRES_USER:-postgres} password=${POSTGRES_PASSWORD:-password} dbname=${POSTGRES_DB:-kartcis} port=5432 sslmode=disable
       - JWT_SECRET=${JWT_SECRET}
       - SMTP_HOST=${SMTP_HOST}

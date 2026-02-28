@@ -3,6 +3,7 @@ services:
     image: postgres:15-alpine
     restart: unless-stopped
     environment:
+      TZ: "Asia/Jakarta"
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
       POSTGRES_DB: kartcis
@@ -40,6 +41,7 @@ services:
     ports:
       - "8000:8000"
     environment:
+      TZ: "Asia/Jakarta"
       PORT: "8000"
       DATABASE_URL: "host=db user=postgres password=password dbname=kartcis port=5432 sslmode=disable"
       JWT_SECRET: "rahasia_negara_123"
