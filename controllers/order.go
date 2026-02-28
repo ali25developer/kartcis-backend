@@ -129,54 +129,43 @@ func CreateOrder(c *gin.Context) {
 		activePrice := ticketType.Price
 		isFlashSaleContext := false
 
-		var flashSale models.FlashSale
+		var activeFlashSales []models.FlashSale
+		var flashSale *models.FlashSale
 		now := time.Now()
-		currentDay := int(now.Weekday()) // 0=Sun, 1=Mon...
-		if currentDay == 0 {
-			currentDay = 7 // Make Sunday 7 (Optional depending on mapping, let's keep it simple: "0" inside "0,1,2")
-		} else {
-			// Convert to 1=Mon, 7=Sun standard for our logic if we want, or use string "1" for Mon.
-			// Let's use standard Go: Sunday=0, Monday=1...
+
+		errFlash := tx.Where("ticket_type_id = ? AND is_active = true", ticketType.ID).Find(&activeFlashSales).Error
+		if errFlash == nil && len(activeFlashSales) > 0 {
+			ny, nm, nd := now.Date()
+			currentTimeStr := now.Format("15:04")
+
+			// Temukan 1 Flash Sale yang sedang aktif secara waktu persis saat ini
+			for i := range activeFlashSales {
+				fs := activeFlashSales[i]
+				if fs.FlashDate != nil {
+					sy, sm, sd := fs.FlashDate.Date()
+					if sy == ny && sm == nm && sd == nd {
+						if fs.StartTime != "" && fs.EndTime != "" {
+							if currentTimeStr >= fs.StartTime && currentTimeStr < fs.EndTime {
+								flashSale = &fs
+								break
+							}
+						}
+					}
+				}
+			}
 		}
 
-		errFlash := tx.Where("ticket_type_id = ? AND is_active = true", ticketType.ID).First(&flashSale).Error
-		if errFlash == nil {
-			// Check if flash sale is valid right now
-			isValidDate := true
-			if flashSale.FlashDate != nil {
-				// Compare Year, Month, Day
-				sy, sm, sd := flashSale.FlashDate.Date()
-				ny, nm, nd := now.Date()
-				if sy != ny || sm != nm || sd != nd {
-					isValidDate = false
-				}
-			} else {
-				// If no date is set, maybe it's "every day"?
-				// But user said "1 flash sale 1 tanggal". Let's assume date is required for this to trigger.
-				isValidDate = false
-			}
-
-			// Check Time
-			isValidTime := true
-			if flashSale.StartTime != "" && flashSale.EndTime != "" {
-				currentTimeStr := now.Format("15:04")
-				if currentTimeStr < flashSale.StartTime || currentTimeStr >= flashSale.EndTime {
-					isValidTime = false
-				}
-			}
-
-			if isValidDate && isValidTime {
-				// Flash sale is active, check quota
-				availableFlashQuota := flashSale.Quota - flashSale.Sold
-				if availableFlashQuota >= item.Quantity {
-					isFlashSaleContext = true
-					activePrice = flashSale.FlashPrice
-				} else if availableFlashQuota > 0 {
-					// Edge case: Partially available flash sale
-					tx.Rollback()
-					c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": fmt.Sprintf("Kuota Flash Sale sisa %d, mengurangi pesanan Anda.", availableFlashQuota)})
-					return
-				}
+		if flashSale != nil {
+			// Flash sale is active, check quota
+			availableFlashQuota := flashSale.Quota - flashSale.Sold
+			if availableFlashQuota >= item.Quantity {
+				isFlashSaleContext = true
+				activePrice = flashSale.FlashPrice
+			} else if availableFlashQuota > 0 {
+				// Edge case: Partially available flash sale
+				tx.Rollback()
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": fmt.Sprintf("Kuota Flash Sale sisa %d, mengurangi pesanan Anda.", availableFlashQuota)})
+				return
 			}
 		}
 
@@ -205,7 +194,7 @@ func CreateOrder(c *gin.Context) {
 			}
 		} else {
 			// Deduct flash sale quota
-			resFlash := tx.Model(&flashSale).
+			resFlash := tx.Model(flashSale).
 				Where("quota - sold >= ?", item.Quantity). // Extra safe check
 				Update("sold", gorm.Expr("sold + ?", item.Quantity))
 
