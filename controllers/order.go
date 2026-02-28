@@ -280,6 +280,7 @@ func CreateOrder(c *gin.Context) {
 				AttendeeName:         attendeeName,
 				AttendeeEmail:        attendeeEmail,
 				AttendeePhone:        attendeePhone,
+				PurchasedPrice:       activePrice,
 				CustomFieldResponses: customResponses,
 				Status:               "active",
 			})

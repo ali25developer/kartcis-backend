@@ -164,7 +164,8 @@ type Ticket struct {
 	AttendeeName         string     `json:"attendee_name"`
 	AttendeeEmail        string     `json:"attendee_email"`
 	AttendeePhone        string     `json:"attendee_phone"`
-	Status               string     `json:"status"` // active, used
+	PurchasedPrice       float64    `json:"purchased_price"` // Price paid for this specific ticket
+	Status               string     `json:"status"`          // active, used
 	CheckInAt            *time.Time `json:"check_in_at"`
 	CustomFieldResponses string     `json:"custom_field_responses"` // JSON string with responses
 	CreatedAt            time.Time  `json:"created_at"`

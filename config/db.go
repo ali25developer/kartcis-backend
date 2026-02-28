@@ -107,6 +107,11 @@ func ConnectDB() {
 		DB.Migrator().CreateTable(&models.PasswordReset{})
 	}
 
+	// Manual Migration for Tickets
+	if !DB.Migrator().HasColumn(&models.Ticket{}, "purchased_price") {
+		DB.Migrator().AddColumn(&models.Ticket{}, "purchased_price")
+	}
+
 	seedSettings(DB)
 
 	// Data Migration: Rename 'ended' to 'completed'
