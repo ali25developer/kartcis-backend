@@ -192,23 +192,26 @@ func AdminGetStats(c *gin.Context) {
 			}
 			queryPending.Distinct("orders.id").Count(&pendingOrders)
 
-			type Result struct {
-				Total float64
-			}
-			var result Result
-			queryRevenue := config.DB.Table("tickets").
-				Joins("JOIN orders ON orders.id = tickets.order_id").
-				Joins("JOIN ticket_types ON ticket_types.id = tickets.ticket_type_id").
+			// We need to sum up the distinct total_amount from orders related to the event
+			// Simpler approach: Select distinct orders, then calculate sum.
+			// This prevents duplicate addition if multiple tickets are mapped to the same order.
+			var eventOrders []models.Order
+			queryRevenue2 := config.DB.Table("orders").
+				Joins("JOIN tickets ON tickets.order_id = orders.id").
 				Where("orders.status = ? AND tickets.event_id = ?", "paid", eventID)
 			if startStr != "" {
-				queryRevenue = queryRevenue.Where("orders.created_at >= ?", startStr)
+				queryRevenue2 = queryRevenue2.Where("orders.created_at >= ?", startStr)
 			}
 			if endStr != "" {
-				queryRevenue = queryRevenue.Where("orders.created_at <= ?", endStr)
+				queryRevenue2 = queryRevenue2.Where("orders.created_at <= ?", endStr)
 			}
-			queryRevenue.Select("COALESCE(SUM(ticket_types.price), 0) as total").
-				Scan(&result)
-			totalRevenue = result.Total
+			queryRevenue2.Distinct("orders.id", "orders.total_amount").Find(&eventOrders)
+
+			var actualTotal float64
+			for _, o := range eventOrders {
+				actualTotal += o.TotalAmount
+			}
+			totalRevenue = actualTotal
 		} else {
 			queryUsers := config.DB.Model(&models.User{})
 			if startStr != "" {
