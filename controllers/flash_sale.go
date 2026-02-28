@@ -114,8 +114,10 @@ func UpdateFlashSale(c *gin.Context) {
 		updates["is_active"] = *req.IsActive
 	}
 	if req.FlashDate != "" {
-		fd, _ := parseEventDate(req.FlashDate)
-		updates["flash_date"] = fd
+		fd, err := parseEventDate(req.FlashDate)
+		if err == nil {
+			updates["flash_date"] = fd
+		}
 	}
 
 	config.DB.Model(&flashSale).Updates(updates)
