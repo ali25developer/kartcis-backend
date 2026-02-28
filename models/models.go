@@ -165,6 +165,7 @@ type Ticket struct {
 	AttendeeEmail        string     `json:"attendee_email"`
 	AttendeePhone        string     `json:"attendee_phone"`
 	PurchasedPrice       float64    `json:"purchased_price"` // Price paid for this specific ticket
+	FlashSaleID          *uint      `json:"flash_sale_id"`   // Linked flash sale (optional)
 	Status               string     `json:"status"`          // active, used
 	CheckInAt            *time.Time `json:"check_in_at"`
 	CustomFieldResponses string     `json:"custom_field_responses"` // JSON string with responses

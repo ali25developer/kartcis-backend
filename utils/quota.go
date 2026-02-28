@@ -13,26 +13,29 @@ func RestoreQuota(tx *gorm.DB, orderID uint) error {
 		return err
 	}
 
-	// Group by ticket type
-	counts := make(map[uint]int)
+	// Group by ticket type and flash sale
+	ticketTypeCounts := make(map[uint]int)
+	flashSaleCounts := make(map[uint]int)
+
 	for _, t := range tickets {
-		counts[t.TicketTypeID]++
+		ticketTypeCounts[t.TicketTypeID]++
+		if t.FlashSaleID != nil {
+			flashSaleCounts[*t.FlashSaleID]++
+		}
 	}
 
-	for ttID, count := range counts {
-		// Get the current Quota to ensure we don't restore beyond it
-		var tt models.TicketType
-		if err := tx.First(&tt, ttID).Error; err != nil {
-			continue
-		}
-
-		newAvailable := tt.Available + count
-		if newAvailable > tt.Quota {
-			newAvailable = tt.Quota
-		}
-
+	// Restore normal ticket type available quota
+	for ttID, count := range ticketTypeCounts {
 		if err := tx.Model(&models.TicketType{}).Where("id = ?", ttID).
-			Update("available", newAvailable).Error; err != nil {
+			Update("available", gorm.Expr("available + ?", count)).Error; err != nil {
+			return err
+		}
+	}
+
+	// Restore Flash Sale sold count
+	for fsID, count := range flashSaleCounts {
+		if err := tx.Model(&models.FlashSale{}).Where("id = ?", fsID).
+			Update("sold", gorm.Expr("sold - ?", count)).Error; err != nil {
 			return err
 		}
 	}

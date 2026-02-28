@@ -279,6 +279,12 @@ func CreateOrder(c *gin.Context) {
 				}
 			}
 
+			var flashID *uint
+			if isFlashSaleContext && flashSale != nil {
+				id := flashSale.ID
+				flashID = &id
+			}
+
 			orderItems = append(orderItems, models.Ticket{
 				EventID:              ticketType.EventID,
 				TicketTypeID:         ticketType.ID,
@@ -287,6 +293,7 @@ func CreateOrder(c *gin.Context) {
 				AttendeeEmail:        attendeeEmail,
 				AttendeePhone:        attendeePhone,
 				PurchasedPrice:       activePrice,
+				FlashSaleID:          flashID,
 				CustomFieldResponses: customResponses,
 				Status:               "active",
 			})

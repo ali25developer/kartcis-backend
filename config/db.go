@@ -111,6 +111,9 @@ func ConnectDB() {
 	if !DB.Migrator().HasColumn(&models.Ticket{}, "purchased_price") {
 		DB.Migrator().AddColumn(&models.Ticket{}, "purchased_price")
 	}
+	if !DB.Migrator().HasColumn(&models.Ticket{}, "flash_sale_id") {
+		DB.Migrator().AddColumn(&models.Ticket{}, "flash_sale_id")
+	}
 
 	seedSettings(DB)
 
