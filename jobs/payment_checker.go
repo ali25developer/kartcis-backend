@@ -128,7 +128,7 @@ func CheckBankJagoEmails(source string) {
 		}
 
 		if body != "" {
-			processJagoEmail(body, source)
+			ProcessJagoEmail(body, source, msg.Envelope.MessageId, msg.Envelope.Date)
 		}
 	}
 
@@ -137,52 +137,104 @@ func CheckBankJagoEmails(source string) {
 	}
 }
 
-func processJagoEmail(body string, source string) {
-	// Sample Jago Body: "Kamu dapet transferan nih! ... Nominal: Rp 50.412 ... Pengirim: JOHN DOE"
-	// Regex to find Amount
-	re := regexp.MustCompile(`Rp\s?([0-9.]+)`)
+func ProcessJagoEmail(body string, source string, messageID string, emailDate time.Time) {
+	// 1. Clean HTML tags if present
+	body = stripHTML(body)
+
+	// 1.1 Transactional check for message deduplication
+	tx := config.DB.Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	var existingTx models.BankTransaction
+	if tx.Where("reference_id = ?", messageID).First(&existingTx).Error == nil {
+		tx.Rollback()
+		return
+	}
+
+	// 2. Parse Email Body with very flexible Regex
+	// Support: Nominal, Total, Jumlah, Amount
+	// Support: Pengirim, Dari
+	re := regexp.MustCompile(`(?i)(?:Nominal|Total|Jumlah|Jumlah\stransaksi)[:\s]*Rp\s?([0-9.]+)`)
 	match := re.FindStringSubmatch(body)
 	if len(match) < 2 {
-		return
+		re = regexp.MustCompile(`(?i)Rp\s?([0-9.]+)`)
+		match = re.FindStringSubmatch(body)
+		if len(match) < 2 {
+			tx.Rollback()
+			return
+		}
 	}
 
 	amountStr := strings.ReplaceAll(match[1], ".", "")
 	amount, err := strconv.ParseFloat(amountStr, 64)
 	if err != nil {
+		tx.Rollback()
 		return
 	}
 
-	log.Printf("[%s-PaymentJob] Found Jago Transfer: Rp %v\n", source, amount)
+	// Extract Sender Name (Support Dari or Pengirim)
+	senderRe := regexp.MustCompile(`(?i)(?:Pengirim|Dari)[:\s]*([^\r\n<]+)`)
+	senderMatch := senderRe.FindStringSubmatch(body)
+	senderName := "Unknown"
+	if len(senderMatch) >= 2 {
+		senderName = strings.TrimSpace(senderMatch[1])
+	}
 
-	// Search for pending order with this exact amount
-	// Search for matching order
+	// 3. Search for matching order
 	var order models.Order
+	statusOptions := []string{"pending", "expired", "cancelled"}
 
-	// 1. Prioritize PENDING orders (Exact match total amount)
-	// Note: GORM where automatically handles the condition securely
-	if err := config.DB.Where("status = ? AND total_amount = ?", "pending", amount).First(&order).Error; err != nil {
-
-		// 2. Fallback: Check RECENTLY Cancelled/Expired orders (within last 60 mins)
-		oneHourAgo := time.Now().Add(-60 * time.Minute)
-		if err := config.DB.Where("status IN ? AND total_amount = ? AND created_at >= ?",
-			[]string{"cancelled", "expired"}, amount, oneHourAgo).
-			Order("created_at desc"). // Pick the NEWEST attempt if multiple exist
-			First(&order).Error; err != nil {
-
-			// Still not found even in history -> Give up
-			return
-		}
-		log.Printf("[%s-PaymentJob] Found matching CANCELLED/EXPIRED order: %s. Reviving...", source, order.OrderNumber)
-	}
-
-	// Double check if it's a Bank Transfer Jago payment
-	if !strings.Contains(order.PaymentMethod, "BANK_TRANSFER_JAGO") && order.PaymentMethod != "MANUAL_JAGO" {
-		log.Printf("[%s-PaymentJob] Ignored order %s. Payment Method is %s (Not Jago)\n", source, order.OrderNumber, order.PaymentMethod)
+	if err := tx.Where("status IN ? AND total_amount = ? AND created_at <= ?",
+		statusOptions, amount, emailDate.Add(2*time.Minute)).
+		Order("created_at desc").
+		First(&order).Error; err != nil {
+		// Log matching failed (Maybe already Paid or not our order)
+		// We STILL record this message ID to prevent re-processing every minute
+		tx.Create(&models.BankTransaction{
+			ReferenceID:     messageID,
+			Amount:          amount,
+			Sender:          senderName,
+			BankName:        "Bank Jago (Unmatched)",
+			TransactionDate: emailDate,
+			RawData:         body,
+			CreatedAt:       time.Now(),
+		})
+		tx.Commit()
 		return
 	}
 
-	// Mark as Paid
-	tx := config.DB.Begin()
+	// 4. Payment Method Validation
+	if !strings.Contains(order.PaymentMethod, "BANK_TRANSFER_JAGO") && order.PaymentMethod != "MANUAL_JAGO" {
+		log.Printf("[%s-PaymentJob] Ignored order %s. Payment Method mismatch: %s\n", source, order.OrderNumber, order.PaymentMethod)
+		// Still record to log to prevent check every time
+		tx.Create(&models.BankTransaction{
+			OrderID:         &order.ID,
+			ReferenceID:     messageID,
+			Amount:          amount,
+			Sender:          senderName,
+			BankName:        "Bank Jago (Mismatch Method)",
+			TransactionDate: emailDate,
+			RawData:         body,
+			CreatedAt:       time.Now(),
+		})
+		tx.Commit()
+		return
+	}
+
+	// 5. Handle Quota Re-deduction if revived from Expired/Cancelled
+	isRevived := order.Status == "expired" || order.Status == "cancelled"
+	if isRevived {
+		log.Printf("[%s-PaymentJob] Reviving %s order %s...", source, order.Status, order.OrderNumber)
+		if err := utils.DeductQuota(tx, order.ID); err != nil {
+			log.Printf("[%s-PaymentJob] WARNING: Quota re-deduction failed for revived order %s: %v. Overbooking likely.\n", source, order.OrderNumber, err)
+		}
+	}
+
+	// 6. Mark as Paid
 	now := time.Now()
 	order.Status = "paid"
 	order.PaidAt = &now
@@ -191,20 +243,38 @@ func processJagoEmail(body string, source string) {
 		return
 	}
 
-	// Record history
+	// 7. Record History & Transaction
 	tx.Create(&models.OrderStatusHistory{
 		OrderID:   order.ID,
 		Status:    "paid",
-		Notes:     fmt.Sprintf("Verified %s via Bank Jago Email", source),
+		Notes:     fmt.Sprintf("Verified %s via Email (%s). Original Status: %s", source, messageID, order.Status),
 		CreatedAt: now,
 	})
 
-	tx.Commit()
+	tx.Create(&models.BankTransaction{
+		OrderID:         &order.ID,
+		ReferenceID:     messageID,
+		Amount:          amount,
+		Sender:          senderName,
+		BankName:        "Bank Jago",
+		TransactionDate: emailDate,
+		RawData:         body,
+		CreatedAt:       now,
+	})
 
-	log.Printf("[%s-PaymentJob] Order %s marked as PAID via Email Verification\n", source, order.OrderNumber)
+	if err := tx.Commit().Error; err != nil {
+		return
+	}
 
-	// Send Ticket
+	log.Printf("[%s-PaymentJob] Order %s marked as PAID successfully\n", source, order.OrderNumber)
+
+	// 8. Send Ticket (Outside transaction)
 	var tickets []models.Ticket
 	config.DB.Preload("Event").Preload("TicketType").Where("order_id = ?", order.ID).Find(&tickets)
 	utils.SendTicketEmail(order, tickets)
+}
+
+func stripHTML(html string) string {
+	re := regexp.MustCompile(`<[^>]*>`)
+	return re.ReplaceAllString(html, " ")
 }

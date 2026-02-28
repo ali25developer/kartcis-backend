@@ -1,0 +1,193 @@
+=== RUN   TestPaymentChecker_HandleOldEmail
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mrecord not found
+[0m[33m[0.046ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<old-email-123@jago.com>" ORDER BY `bank_transactions`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:191 [35;1mrecord not found
+[0m[33m[0.092ms] [34;1m[rows:0][0m SELECT * FROM `orders` WHERE status IN ("pending","expired","cancelled") AND total_amount = 100302 AND created_at <= "2026-02-28 13:54:38.139" ORDER BY created_at desc,`orders`.`id` LIMIT 1
+--- PASS: TestPaymentChecker_HandleOldEmail (0.01s)
+=== RUN   TestPaymentChecker_ValidPayment
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mrecord not found
+[0m[33m[0.026ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<valid-email-456@jago.com>" ORDER BY `bank_transactions`.`id` LIMIT 1
+2026/02/28 14:52:38 [Test-PaymentJob] Order ORD-VALID-202 marked as PAID successfully
+--- PASS: TestPaymentChecker_ValidPayment (0.00s)
+=== RUN   TestPaymentChecker_Deduplication
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mrecord not found
+[0m[33m[0.037ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<unique-msg-999>" ORDER BY `bank_transactions`.`id` LIMIT 1
+2026/02/28 14:52:38 [Test-PaymentJob] Order  marked as PAID successfully
+--- PASS: TestPaymentChecker_Deduplication (0.00s)
+=== RUN   TestQuota_ReviveExpiredOrder
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mrecord not found
+[0m[33m[0.020ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<late-payment-001>" ORDER BY `bank_transactions`.`id` LIMIT 1
+2026/02/28 14:52:38 [Test-PaymentJob] Reviving expired order ORD-EXP-303...
+2026/02/28 14:52:38 [Test-PaymentJob] Order ORD-EXP-303 marked as PAID successfully
+--- PASS: TestQuota_ReviveExpiredOrder (0.00s)
+=== RUN   TestPaymentChecker_HighVolumeConcurrency
+2026/02/28 14:52:38 [Mailer] SMTP not configured, skipping email send for Order: ORD-EXP-303
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mrecord not found
+[0m[33m[0.024ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<msg-unique-2@jago.com>" ORDER BY `bank_transactions`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mrecord not found
+[0m[33m[0.033ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<msg-unique-7@jago.com>" ORDER BY `bank_transactions`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mrecord not found
+[0m[33m[0.027ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<msg-unique-1@jago.com>" ORDER BY `bank_transactions`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mrecord not found
+[0m[33m[0.282ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<msg-unique-9@jago.com>" ORDER BY `bank_transactions`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mrecord not found
+[0m[33m[0.418ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<msg-unique-6@jago.com>" ORDER BY `bank_transactions`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mrecord not found
+[0m[33m[0.089ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<msg-unique-5@jago.com>" ORDER BY `bank_transactions`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:191 [35;1mdatabase table is locked: orders
+[0m[33m[0.530ms] [34;1m[rows:0][0m SELECT * FROM `orders` WHERE status IN ("pending","expired","cancelled") AND total_amount = 100108 AND created_at <= "2026-02-28 14:54:38.153" ORDER BY created_at desc,`orders`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mrecord not found
+[0m[33m[0.354ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<msg-unique-8@jago.com>" ORDER BY `bank_transactions`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:191 [35;1mdatabase table is locked: orders
+[0m[33m[0.055ms] [34;1m[rows:0][0m SELECT * FROM `orders` WHERE status IN ("pending","expired","cancelled") AND total_amount = 100110 AND created_at <= "2026-02-28 14:54:38.153" ORDER BY created_at desc,`orders`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mrecord not found
+[0m[33m[0.537ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<msg-unique-0@jago.com>" ORDER BY `bank_transactions`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:191 [35;1mdatabase table is locked: orders
+[0m[33m[0.087ms] [34;1m[rows:0][0m SELECT * FROM `orders` WHERE status IN ("pending","expired","cancelled") AND total_amount = 100109 AND created_at <= "2026-02-28 14:54:38.153" ORDER BY created_at desc,`orders`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mrecord not found
+[0m[33m[0.394ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<msg-unique-4@jago.com>" ORDER BY `bank_transactions`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:191 [35;1mdatabase table is locked: orders
+[0m[33m[0.206ms] [34;1m[rows:0][0m SELECT * FROM `orders` WHERE status IN ("pending","expired","cancelled") AND total_amount = 100102 AND created_at <= "2026-02-28 14:54:38.153" ORDER BY created_at desc,`orders`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:251 [35;1mdatabase table is locked: bank_transactions
+[0m[33m[0.405ms] [34;1m[rows:0][0m INSERT INTO `bank_transactions` (`order_id`,`reference_id`,`amount`,`sender`,`bank_name`,`transaction_date`,`raw_data`,`created_at`) VALUES (7,"<msg-unique-2@jago.com>",100103,"Unknown","Bank Jago","2026-02-28 14:52:38.153","Nominal: Rp 100103","2026-02-28 14:52:38.153") RETURNING `id`
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mdatabase table is locked
+[0m[33m[0.768ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<msg-unique-3@jago.com>" ORDER BY `bank_transactions`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:194 [35;1mdatabase table is locked
+[0m[33m[0.245ms] [34;1m[rows:0][0m INSERT INTO `bank_transactions` (`order_id`,`reference_id`,`amount`,`sender`,`bank_name`,`transaction_date`,`raw_data`,`created_at`) VALUES (NULL,"<msg-unique-9@jago.com>",100110,"Unknown","Bank Jago (Unmatched)","2026-02-28 14:52:38.153","Nominal: Rp 100110","2026-02-28 14:52:38.155") RETURNING `id`
+2026/02/28 14:52:38 [SyncTest-PaymentJob] Order ORD-CONC-2 marked as PAID successfully
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:194 [35;1mdatabase table is locked
+[0m[33m[0.054ms] [34;1m[rows:0][0m INSERT INTO `bank_transactions` (`order_id`,`reference_id`,`amount`,`sender`,`bank_name`,`transaction_date`,`raw_data`,`created_at`) VALUES (NULL,"<msg-unique-1@jago.com>",100102,"Unknown","Bank Jago (Unmatched)","2026-02-28 14:52:38.153","Nominal: Rp 100102","2026-02-28 14:52:38.155") RETURNING `id`
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:191 [35;1mdatabase table is locked: orders
+[0m[33m[0.493ms] [34;1m[rows:0][0m SELECT * FROM `orders` WHERE status IN ("pending","expired","cancelled") AND total_amount = 100107 AND created_at <= "2026-02-28 14:54:38.153" ORDER BY created_at desc,`orders`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:191 [35;1mdatabase table is locked: orders
+[0m[33m[0.073ms] [34;1m[rows:0][0m SELECT * FROM `orders` WHERE status IN ("pending","expired","cancelled") AND total_amount = 100105 AND created_at <= "2026-02-28 14:54:38.153" ORDER BY created_at desc,`orders`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:194 [35;1mdatabase table is locked: bank_transactions
+[0m[33m[0.140ms] [34;1m[rows:0][0m INSERT INTO `bank_transactions` (`order_id`,`reference_id`,`amount`,`sender`,`bank_name`,`transaction_date`,`raw_data`,`created_at`) VALUES (NULL,"<msg-unique-6@jago.com>",100107,"Unknown","Bank Jago (Unmatched)","2026-02-28 14:52:38.153","Nominal: Rp 100107","2026-02-28 14:52:38.155") RETURNING `id`
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:194 [35;1mdatabase table is locked
+[0m[33m[0.263ms] [34;1m[rows:0][0m INSERT INTO `bank_transactions` (`order_id`,`reference_id`,`amount`,`sender`,`bank_name`,`transaction_date`,`raw_data`,`created_at`) VALUES (NULL,"<msg-unique-8@jago.com>",100109,"Unknown","Bank Jago (Unmatched)","2026-02-28 14:52:38.153","Nominal: Rp 100109","2026-02-28 14:52:38.155") RETURNING `id`
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:191 [35;1mdatabase table is locked: orders
+[0m[33m[0.408ms] [34;1m[rows:0][0m SELECT * FROM `orders` WHERE status IN ("pending","expired","cancelled") AND total_amount = 100106 AND created_at <= "2026-02-28 14:54:38.153" ORDER BY created_at desc,`orders`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:194 [35;1mdatabase table is locked: bank_transactions
+[0m[33m[0.060ms] [34;1m[rows:0][0m INSERT INTO `bank_transactions` (`order_id`,`reference_id`,`amount`,`sender`,`bank_name`,`transaction_date`,`raw_data`,`created_at`) VALUES (NULL,"<msg-unique-4@jago.com>",100105,"Unknown","Bank Jago (Unmatched)","2026-02-28 14:52:38.153","Nominal: Rp 100105","2026-02-28 14:52:38.155") RETURNING `id`
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:270 [35;1mdatabase table is locked
+[0m[33m[0.348ms] [34;1m[rows:0][0m SELECT * FROM `tickets` WHERE order_id = 7
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:194 [35;1mdatabase table is locked
+[0m[33m[0.167ms] [34;1m[rows:0][0m INSERT INTO `bank_transactions` (`order_id`,`reference_id`,`amount`,`sender`,`bank_name`,`transaction_date`,`raw_data`,`created_at`) VALUES (NULL,"<msg-unique-7@jago.com>",100108,"Unknown","Bank Jago (Unmatched)","2026-02-28 14:52:38.153","Nominal: Rp 100108","2026-02-28 14:52:38.155") RETURNING `id`
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:191 [35;1mdatabase table is locked
+[0m[33m[0.200ms] [34;1m[rows:0][0m SELECT * FROM `orders` WHERE status IN ("pending","expired","cancelled") AND total_amount = 100104 AND created_at <= "2026-02-28 14:54:38.153" ORDER BY created_at desc,`orders`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:194 [35;1mdatabase table is locked
+[0m[33m[0.144ms] [34;1m[rows:0][0m INSERT INTO `bank_transactions` (`order_id`,`reference_id`,`amount`,`sender`,`bank_name`,`transaction_date`,`raw_data`,`created_at`) VALUES (NULL,"<msg-unique-5@jago.com>",100106,"Unknown","Bank Jago (Unmatched)","2026-02-28 14:52:38.153","Nominal: Rp 100106","2026-02-28 14:52:38.155") RETURNING `id`
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:194 [35;1mdatabase table is locked
+[0m[33m[0.224ms] [34;1m[rows:0][0m INSERT INTO `bank_transactions` (`order_id`,`reference_id`,`amount`,`sender`,`bank_name`,`transaction_date`,`raw_data`,`created_at`) VALUES (NULL,"<msg-unique-3@jago.com>",100104,"Unknown","Bank Jago (Unmatched)","2026-02-28 14:52:38.153","Nominal: Rp 100104","2026-02-28 14:52:38.155") RETURNING `id`
+2026/02/28 14:52:38 [SyncTest-PaymentJob] Order ORD-CONC-0 marked as PAID successfully
+    payment_checker_test.go:201: 
+        	Error Trace:	/Users/user/Development/golang/backend-go/jobs/payment_checker_test.go:201
+        	Error:      	Not equal: 
+        	            	expected: 10
+        	            	actual  : 5
+        	Test:       	TestPaymentChecker_HighVolumeConcurrency
+--- FAIL: TestPaymentChecker_HighVolumeConcurrency (0.01s)
+=== RUN   TestPaymentChecker_DuplicateID_RaceCondition
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mrecord not found
+[0m[33m[0.077ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<THE-SAME-MSG-ID>" ORDER BY `bank_transactions`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mrecord not found
+[0m[33m[0.028ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<THE-SAME-MSG-ID>" ORDER BY `bank_transactions`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mrecord not found
+[0m[33m[0.269ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<THE-SAME-MSG-ID>" ORDER BY `bank_transactions`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mrecord not found
+[0m[33m[0.047ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<THE-SAME-MSG-ID>" ORDER BY `bank_transactions`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mrecord not found
+[0m[33m[0.137ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<THE-SAME-MSG-ID>" ORDER BY `bank_transactions`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mrecord not found
+[0m[33m[0.115ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<THE-SAME-MSG-ID>" ORDER BY `bank_transactions`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mrecord not found
+[0m[33m[0.210ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<THE-SAME-MSG-ID>" ORDER BY `bank_transactions`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mrecord not found
+[0m[33m[0.180ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<THE-SAME-MSG-ID>" ORDER BY `bank_transactions`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mrecord not found
+[0m[33m[0.275ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<THE-SAME-MSG-ID>" ORDER BY `bank_transactions`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:238 [35;1mdatabase table is locked: orders
+[0m[33m[0.386ms] [34;1m[rows:0][0m UPDATE `orders` SET `user_id`=NULL,`order_number`="",`customer_name`="",`customer_email`="",`customer_phone`="",`total_amount`=999000,`admin_fee`=0,`discount_amount`=0,`voucher_code`="",`unique_code`=0,`status`="paid",`payment_method`="BANK_TRANSFER_JAGO",`virtual_account_number`="",`payment_url`="",`payment_data`="",`payment_instructions`="",`paid_at`="2026-02-28 14:52:38.16",`expires_at`=NULL,`created_at`="2026-02-28 13:52:38.158",`updated_at`="2026-02-28 14:52:38.16" WHERE `id` = 15
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:238 [35;1mdatabase table is locked
+[0m[33m[0.117ms] [34;1m[rows:0][0m UPDATE `orders` SET `user_id`=NULL,`order_number`="",`customer_name`="",`customer_email`="",`customer_phone`="",`total_amount`=999000,`admin_fee`=0,`discount_amount`=0,`voucher_code`="",`unique_code`=0,`status`="paid",`payment_method`="BANK_TRANSFER_JAGO",`virtual_account_number`="",`payment_url`="",`payment_data`="",`payment_instructions`="",`paid_at`="2026-02-28 14:52:38.16",`expires_at`=NULL,`created_at`="2026-02-28 13:52:38.158",`updated_at`="2026-02-28 14:52:38.16" WHERE `id` = 15
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:150 [35;1mdatabase table is locked
+[0m[33m[0.154ms] [34;1m[rows:0][0m SELECT * FROM `bank_transactions` WHERE reference_id = "<THE-SAME-MSG-ID>" ORDER BY `bank_transactions`.`id` LIMIT 1
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:238 [35;1mdatabase table is locked: orders
+[0m[33m[0.357ms] [34;1m[rows:0][0m UPDATE `orders` SET `user_id`=NULL,`order_number`="",`customer_name`="",`customer_email`="",`customer_phone`="",`total_amount`=999000,`admin_fee`=0,`discount_amount`=0,`voucher_code`="",`unique_code`=0,`status`="paid",`payment_method`="BANK_TRANSFER_JAGO",`virtual_account_number`="",`payment_url`="",`payment_data`="",`payment_instructions`="",`paid_at`="2026-02-28 14:52:38.16",`expires_at`=NULL,`created_at`="2026-02-28 13:52:38.158",`updated_at`="2026-02-28 14:52:38.16" WHERE `id` = 15
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:238 [35;1mdatabase table is locked
+[0m[33m[0.214ms] [34;1m[rows:0][0m UPDATE `orders` SET `user_id`=NULL,`order_number`="",`customer_name`="",`customer_email`="",`customer_phone`="",`total_amount`=999000,`admin_fee`=0,`discount_amount`=0,`voucher_code`="",`unique_code`=0,`status`="paid",`payment_method`="BANK_TRANSFER_JAGO",`virtual_account_number`="",`payment_url`="",`payment_data`="",`payment_instructions`="",`paid_at`="2026-02-28 14:52:38.16",`expires_at`=NULL,`created_at`="2026-02-28 13:52:38.158",`updated_at`="2026-02-28 14:52:38.16" WHERE `id` = 15
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:238 [35;1mdatabase table is locked
+[0m[33m[0.259ms] [34;1m[rows:0][0m UPDATE `orders` SET `user_id`=NULL,`order_number`="",`customer_name`="",`customer_email`="",`customer_phone`="",`total_amount`=999000,`admin_fee`=0,`discount_amount`=0,`voucher_code`="",`unique_code`=0,`status`="paid",`payment_method`="BANK_TRANSFER_JAGO",`virtual_account_number`="",`payment_url`="",`payment_data`="",`payment_instructions`="",`paid_at`="2026-02-28 14:52:38.16",`expires_at`=NULL,`created_at`="2026-02-28 13:52:38.158",`updated_at`="2026-02-28 14:52:38.16" WHERE `id` = 15
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:238 [35;1mdatabase table is locked
+[0m[33m[0.079ms] [34;1m[rows:0][0m UPDATE `orders` SET `user_id`=NULL,`order_number`="",`customer_name`="",`customer_email`="",`customer_phone`="",`total_amount`=999000,`admin_fee`=0,`discount_amount`=0,`voucher_code`="",`unique_code`=0,`status`="paid",`payment_method`="BANK_TRANSFER_JAGO",`virtual_account_number`="",`payment_url`="",`payment_data`="",`payment_instructions`="",`paid_at`="2026-02-28 14:52:38.16",`expires_at`=NULL,`created_at`="2026-02-28 13:52:38.158",`updated_at`="2026-02-28 14:52:38.16" WHERE `id` = 15
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:238 [35;1mdatabase table is locked: orders
+[0m[33m[0.341ms] [34;1m[rows:0][0m UPDATE `orders` SET `user_id`=NULL,`order_number`="",`customer_name`="",`customer_email`="",`customer_phone`="",`total_amount`=999000,`admin_fee`=0,`discount_amount`=0,`voucher_code`="",`unique_code`=0,`status`="paid",`payment_method`="BANK_TRANSFER_JAGO",`virtual_account_number`="",`payment_url`="",`payment_data`="",`payment_instructions`="",`paid_at`="2026-02-28 14:52:38.16",`expires_at`=NULL,`created_at`="2026-02-28 13:52:38.158",`updated_at`="2026-02-28 14:52:38.16" WHERE `id` = 15
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:238 [35;1mdatabase table is locked
+[0m[33m[0.140ms] [34;1m[rows:0][0m UPDATE `orders` SET `user_id`=NULL,`order_number`="",`customer_name`="",`customer_email`="",`customer_phone`="",`total_amount`=999000,`admin_fee`=0,`discount_amount`=0,`voucher_code`="",`unique_code`=0,`status`="paid",`payment_method`="BANK_TRANSFER_JAGO",`virtual_account_number`="",`payment_url`="",`payment_data`="",`payment_instructions`="",`paid_at`="2026-02-28 14:52:38.16",`expires_at`=NULL,`created_at`="2026-02-28 13:52:38.158",`updated_at`="2026-02-28 14:52:38.16" WHERE `id` = 15
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:238 [35;1mdatabase table is locked
+[0m[33m[0.059ms] [34;1m[rows:0][0m UPDATE `orders` SET `user_id`=NULL,`order_number`="",`customer_name`="",`customer_email`="",`customer_phone`="",`total_amount`=999000,`admin_fee`=0,`discount_amount`=0,`voucher_code`="",`unique_code`=0,`status`="paid",`payment_method`="BANK_TRANSFER_JAGO",`virtual_account_number`="",`payment_url`="",`payment_data`="",`payment_instructions`="",`paid_at`="2026-02-28 14:52:38.161",`expires_at`=NULL,`created_at`="2026-02-28 13:52:38.158",`updated_at`="2026-02-28 14:52:38.161" WHERE `id` = 15
+
+2026/02/28 14:52:38 [31;1m/Users/user/Development/golang/backend-go/jobs/payment_checker.go:238 [35;1mdatabase table is locked: orders
+[0m[33m[0.098ms] [34;1m[rows:0][0m UPDATE `orders` SET `user_id`=NULL,`order_number`="",`customer_name`="",`customer_email`="",`customer_phone`="",`total_amount`=999000,`admin_fee`=0,`discount_amount`=0,`voucher_code`="",`unique_code`=0,`status`="paid",`payment_method`="BANK_TRANSFER_JAGO",`virtual_account_number`="",`payment_url`="",`payment_data`="",`payment_instructions`="",`paid_at`="2026-02-28 14:52:38.161",`expires_at`=NULL,`created_at`="2026-02-28 13:52:38.158",`updated_at`="2026-02-28 14:52:38.161" WHERE `id` = 15
+    payment_checker_test.go:238: 
+        	Error Trace:	/Users/user/Development/golang/backend-go/jobs/payment_checker_test.go:238
+        	Error:      	Not equal: 
+        	            	expected: 1
+        	            	actual  : 0
+        	Test:       	TestPaymentChecker_DuplicateID_RaceCondition
+--- FAIL: TestPaymentChecker_DuplicateID_RaceCondition (0.00s)
+FAIL
+FAIL	command-line-arguments	0.446s
+FAIL

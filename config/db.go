@@ -46,9 +46,10 @@ func ConnectDB() {
 		&models.SocialAccount{},
 		&models.OrderStatusHistory{},
 		&models.PasswordReset{},
-		&models.SiteSetting{}, // Added
-		&models.RequestLog{},  // Added for smart logging
-		&models.FlashSale{},   // Added for Flash Sale feature
+		&models.SiteSetting{},     // Added
+		&models.RequestLog{},      // Added for smart logging
+		&models.FlashSale{},       // Added for Flash Sale feature
+		&models.BankTransaction{}, // Added for Payment Tracking
 	)
 	if err != nil {
 		log.Println("Migration failed:", err)

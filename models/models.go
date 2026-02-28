@@ -229,3 +229,14 @@ type FlashSale struct {
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 }
+type BankTransaction struct {
+	ID              uint      `gorm:"primaryKey" json:"id"`
+	OrderID         *uint     `json:"order_id"`                        // Linked order if found
+	ReferenceID     string    `gorm:"uniqueIndex" json:"reference_id"` // Message ID or Unique Hash
+	Amount          float64   `json:"amount"`
+	Sender          string    `json:"sender"`
+	BankName        string    `json:"bank_name"`
+	TransactionDate time.Time `json:"transaction_date"`
+	RawData         string    `json:"raw_data"`
+	CreatedAt       time.Time `json:"created_at"`
+}
