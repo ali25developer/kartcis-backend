@@ -66,10 +66,11 @@ func CheckBankJagoEmails(source string) {
 
 	criteria := imap.NewSearchCriteria()
 	criteria.Since = time.Now().Add(-24 * time.Hour)
+	criteria.WithoutFlags = []string{imap.SeenFlag} // Hanya cari yang UNSEEN (belum dibaca)
 	// Broaden to anything from jago.com to handle no-reply or noreply
 	criteria.Header.Set("From", "jago.com")
 
-	log.Printf("[%s-PaymentJob] Checking for new emails...", source)
+	log.Printf("[%s-PaymentJob] Checking for new unseen emails...", source)
 	ids, err := c.Search(criteria)
 	log.Printf("[%s-PaymentJob] Found %d matching emails in last 24h\n", source, len(ids))
 	if err != nil {
@@ -186,7 +187,9 @@ func ProcessJagoEmail(body string, source string, messageID string, emailDate ti
 
 	// 3. Search for matching order
 	var order models.Order
-	statusOptions := []string{"pending", "expired", "cancelled"}
+	// ONLY check pending orders. Do NOT check expired/cancelled to prevent
+	// reviving invalid orders (especially due to past duplicate unique code bugs)
+	statusOptions := []string{"pending"}
 
 	if err := tx.Where("status IN ? AND total_amount = ? AND created_at <= ?",
 		statusOptions, amount, emailDate.Add(2*time.Minute)).
@@ -223,15 +226,6 @@ func ProcessJagoEmail(body string, source string, messageID string, emailDate ti
 		})
 		tx.Commit()
 		return
-	}
-
-	// 5. Handle Quota Re-deduction if revived from Expired/Cancelled
-	isRevived := order.Status == "expired" || order.Status == "cancelled"
-	if isRevived {
-		log.Printf("[%s-PaymentJob] Reviving %s order %s...", source, order.Status, order.OrderNumber)
-		if err := utils.DeductQuota(tx, order.ID); err != nil {
-			log.Printf("[%s-PaymentJob] WARNING: Quota re-deduction failed for revived order %s: %v. Overbooking likely.\n", source, order.OrderNumber, err)
-		}
 	}
 
 	// 6. Mark as Paid

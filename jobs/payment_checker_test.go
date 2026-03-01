@@ -119,7 +119,7 @@ func TestPaymentChecker_Deduplication(t *testing.T) {
 	assert.Equal(t, int64(1), count, "Email should only be recorded once")
 }
 
-func TestQuota_ReviveExpiredOrder(t *testing.T) {
+func TestQuota_DoNotReviveExpiredOrder(t *testing.T) {
 	setupTestDB()
 
 	// 1. Setup Ticket Type with limited quota
@@ -150,15 +150,15 @@ func TestQuota_ReviveExpiredOrder(t *testing.T) {
 
 	ProcessJagoEmail(emailBody, "Test", messageID, emailDate)
 
-	// Verify order is PAID anyway (Customer Satisfaction)
+	// Verify order is still EXPIRED (We do not revive anymore)
 	var updatedOrder models.Order
 	config.DB.First(&updatedOrder, order.ID)
-	assert.Equal(t, "paid", updatedOrder.Status)
+	assert.Equal(t, "expired", updatedOrder.Status)
 
-	// Verify quota is now -2 (Overbooked but tracked)
+	// Verify quota is still 0 (unchanged)
 	var updatedTT models.TicketType
 	config.DB.First(&updatedTT, tt.ID)
-	assert.Equal(t, -2, updatedTT.Available, "Quota should be deducted (negative if sold out) to maintain integrity")
+	assert.Equal(t, 0, updatedTT.Available, "Quota should not be deducted because order is not revived")
 }
 
 func TestPaymentChecker_NormalTemplateVariations(t *testing.T) {
@@ -358,4 +358,119 @@ func TestPaymentChecker_IdenticalUniqueCodes(t *testing.T) {
 	// Result: Since Order B is already PAID, it should now match Order A
 	config.DB.Where("order_number = ?", "ORD-A").First(&checkA)
 	assert.Equal(t, "paid", checkA.Status, "Older order should now be paid because the recent one is already cleared")
+}
+
+func TestPaymentChecker_SameAmountMultipleStatuses(t *testing.T) {
+	setupTestDB()
+
+	// SCENARIO: Bug in the past generated multiple orders with the EXACT same unique code (TotalAmount).
+	// Some are already expired/cancelled/paid, but only ONE is truly legitimately "pending".
+	// We want to ensure an incoming transfer only targets the "pending" one, NOT the others.
+	amount := 350999.0
+
+	// 1. Create Order A (Cancelled) - Oldest
+	orderA := models.Order{OrderNumber: "ORD-BUG-A", TotalAmount: amount, Status: "cancelled", PaymentMethod: "BANK_TRANSFER_JAGO", CreatedAt: time.Now().Add(-3 * time.Hour)}
+	config.DB.Create(&orderA)
+
+	// 2. Create Order B (Expired) - From 2 hours ago
+	orderB := models.Order{OrderNumber: "ORD-BUG-B", TotalAmount: amount, Status: "expired", PaymentMethod: "BANK_TRANSFER_JAGO", CreatedAt: time.Now().Add(-2 * time.Hour)}
+	config.DB.Create(&orderB)
+
+	// 3. Create Order C (Pending) - The legitimate one from 1 hour ago
+	orderC := models.Order{OrderNumber: "ORD-BUG-C", TotalAmount: amount, Status: "pending", PaymentMethod: "BANK_TRANSFER_JAGO", CreatedAt: time.Now().Add(-1 * time.Hour)}
+	config.DB.Create(&orderC)
+
+	// 4. Create Order D (Paid) - A recently paid one (just in case they made another order that got paid)
+	orderD := models.Order{OrderNumber: "ORD-BUG-D", TotalAmount: amount, Status: "paid", PaymentMethod: "BANK_TRANSFER_JAGO", CreatedAt: time.Now().Add(-30 * time.Minute)}
+	config.DB.Create(&orderD)
+
+	// 5. Incoming unread transfer email arrives
+	ProcessJagoEmail("Nominal: Rp 350.999", "TestDuplicateBug", "<msg-transfer-bug-new>", time.Now())
+
+	// Verifications:
+	// A: Cancelled should remain cancelled
+	var actA models.Order
+	config.DB.Where("order_number = ?", "ORD-BUG-A").First(&actA)
+	assert.Equal(t, "cancelled", actA.Status, "Cancelled order must NOT be revived")
+
+	// B: Expired should remain expired
+	var actB models.Order
+	config.DB.Where("order_number = ?", "ORD-BUG-B").First(&actB)
+	assert.Equal(t, "expired", actB.Status, "Expired order must NOT be revived")
+
+	// D: Paid should remain paid
+	var actD models.Order
+	config.DB.Where("order_number = ?", "ORD-BUG-D").First(&actD)
+	assert.Equal(t, "paid", actD.Status, "Paid order must remain paid")
+
+	// C: Pending should become paid (This is the one that SHOULD match!)
+	var actC models.Order
+	config.DB.Where("order_number = ?", "ORD-BUG-C").First(&actC)
+	assert.Equal(t, "paid", actC.Status, "The ONLY pending order should have caught this transfer")
+}
+
+func TestPaymentChecker_ExtremeCombinations_DuplicateBugsAndDelays(t *testing.T) {
+	setupTestDB()
+
+	// SCENARIO: Combine multiple edge cases at once.
+	// 5 Orders have the EXACT same total amount.
+	amount := 888777.0
+
+	// 1. Order A: Cancelled (5 hours ago) - Should never be revived.
+	orderA := models.Order{OrderNumber: "ORD-EXT-A", TotalAmount: amount, Status: "cancelled", PaymentMethod: "BANK_TRANSFER_JAGO", CreatedAt: time.Now().Add(-5 * time.Hour)}
+	config.DB.Create(&orderA)
+
+	// 2. Order B: Pending but wrong Payment Method (4 hours ago) - Should be ignored by Jago checker
+	orderB := models.Order{OrderNumber: "ORD-EXT-B", TotalAmount: amount, Status: "pending", PaymentMethod: "QRIS", CreatedAt: time.Now().Add(-4 * time.Hour)}
+	config.DB.Create(&orderB)
+
+	// 3. Order C: Pending, Valid (2 hours ago) - User 1
+	orderC := models.Order{OrderNumber: "ORD-EXT-C", TotalAmount: amount, Status: "pending", PaymentMethod: "BANK_TRANSFER_JAGO", CreatedAt: time.Now().Add(-2 * time.Hour)}
+	config.DB.Create(&orderC)
+
+	// 4. Order D: Pending, Valid (1 hour ago) - User 2
+	orderD := models.Order{OrderNumber: "ORD-EXT-D", TotalAmount: amount, Status: "pending", PaymentMethod: "BANK_TRANSFER_JAGO", CreatedAt: time.Now().Add(-1 * time.Hour)}
+	config.DB.Create(&orderD)
+
+	now := time.Now()
+
+	// ACTION 1: First Transfer Email arrives (Msg 1)
+	ProcessJagoEmail("Nominal: Rp 888.777", "ExtremeTest", "<msg-ext-1>", now)
+
+	// Result 1: Since Order D is the MOST RECENT valid pending, it should get paid.
+	var actD models.Order
+	config.DB.Where("order_number = ?", "ORD-EXT-D").First(&actD)
+	assert.Equal(t, "paid", actD.Status, "Most recent valid order should be paid first")
+
+	// ACTION 2: The exact same email (Msg 1) arrives AGAIN (Simulating email server delay/retry)
+	ProcessJagoEmail("Nominal: Rp 888.777", "ExtremeTest", "<msg-ext-1>", now.Add(1*time.Minute))
+
+	// Result 2: Deduplication should kick in. No other order should be paid by Msg 1.
+	var actC models.Order
+	config.DB.Where("order_number = ?", "ORD-EXT-C").First(&actC)
+	assert.Equal(t, "pending", actC.Status, "Order C should remain pending because Msg 1 was deduplicated")
+
+	// ACTION 3: Second Transfer Email arrives (Msg 2) with the same nominal
+	ProcessJagoEmail("Nominal: Rp 888.777", "ExtremeTest", "<msg-ext-2>", now.Add(2*time.Minute))
+
+	// Result 3: Now Order C should be paid.
+	config.DB.Where("order_number = ?", "ORD-EXT-C").First(&actC)
+	assert.Equal(t, "paid", actC.Status, "Order C should now be paid by Msg 2")
+
+	// ACTION 4: Third Transfer Email arrives (Msg 3) with the same nominal
+	ProcessJagoEmail("Nominal: Rp 888.777", "ExtremeTest", "<msg-ext-3>", now.Add(3*time.Minute))
+
+	// Result 4: Order A (Cancelled) and Order B (QRIS) should remain untouched.
+	var actA models.Order
+	config.DB.Where("order_number = ?", "ORD-EXT-A").First(&actA)
+	assert.Equal(t, "cancelled", actA.Status, "Cancelled order must not be touched")
+
+	var actB models.Order
+	config.DB.Where("order_number = ?", "ORD-EXT-B").First(&actB)
+	assert.Equal(t, "pending", actB.Status, "Order with QRIS method should remain pending")
+
+	// Msg 3 should be logged as Mismatch Method (Because it matches Order B which is QRIS)
+	var tx3 models.BankTransaction
+	config.DB.Where("reference_id = ?", "<msg-ext-3>").First(&tx3)
+	assert.Contains(t, tx3.BankName, "Mismatch Method")
 }
