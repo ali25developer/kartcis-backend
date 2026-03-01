@@ -695,3 +695,99 @@ const cancellationHtmlTemplate = `
 </body>
 </html>
 `
+
+type EmailVerificationData struct {
+	CustomerName string
+	VerifyURL    string
+}
+
+func SendEmailVerificationEmail(email, name, token string) {
+	smtpHost := os.Getenv("SMTP_HOST")
+	smtpPort := os.Getenv("SMTP_PORT")
+	smtpUser := os.Getenv("SMTP_USER")
+	smtpPass := os.Getenv("SMTP_PASS")
+	from := os.Getenv("SMTP_FROM")
+
+	if smtpHost == "" || smtpUser == "" {
+		// Log but don't crash
+log.Println("[Mailer] SMTP not configured, Email Verification link: ", fmt.Sprintf("%s/verify-email?token=%s&email=%s", os.Getenv("FRONTEND_URL"), token, email))
+return
+}
+
+// Construct Link
+frontendURL := os.Getenv("FRONTEND_URL")
+if frontendURL == "" {
+frontendURL = "https://kartcis.id"
+}
+verifyLink := fmt.Sprintf("%s/verify-email?token=%s&email=%s", frontendURL, token, email)
+
+data := EmailVerificationData{
+CustomerName: name,
+VerifyURL:    verifyLink,
+}
+
+tmpl, err := template.New("email_verification").Parse(emailVerificationHtmlTemplate)
+if err != nil {
+log.Println("[Mailer] Verification Template Parse Error:", err)
+return
+}
+
+var body bytes.Buffer
+if err := tmpl.Execute(&body, data); err != nil {
+log.Println("[Mailer] Verification Template Execute Error:", err)
+return
+}
+
+auth := smtp.PlainAuth("", smtpUser, smtpPass, smtpHost)
+to := []string{email}
+
+subject := "Verifikasi Email - Kartcis.ID"
+msg := []byte("From: " + from + "\r\n" +
+"To: " + email + "\r\n" +
+"Subject: " + subject + "\r\n" +
+"MIME-Version: 1.0\r\n" +
+"Content-Type: text/html; charset=UTF-8\r\n\r\n" +
+body.String())
+
+err = smtp.SendMail(smtpHost+":"+smtpPort, auth, from, to, msg)
+if err != nil {
+log.Println("[Mailer] SendMail Verification Error:", err)
+} else {
+log.Printf("[Mailer] Email verification sent to %s\n", email)
+}
+}
+
+const emailVerificationHtmlTemplate = `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verifikasi Email Kartcis.ID</title>
+    <style>
+        body { font-family: 'Inter', Arial, sans-serif; background-color: #f3f4f6; margin: 0; padding: 0; }
+        .wrapper { padding: 40px 20px; }
+        .container { max-width: 500px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); padding: 40px; text-align: center; }
+        h2 { color: #1e293b; margin-top: 0; }
+        p { color: #64748b; font-size: 16px; line-height: 1.5; margin-bottom: 24px; }
+        .btn { display: inline-block; background-color: #b31356; color: #ffffff !important; padding: 14px 24px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 16px; border-bottom: 3px solid #ffd54c; }
+        .footer { margin-top: 32px; font-size: 12px; color: #94a3b8; }
+    </style>
+</head>
+<body>
+    <div class="wrapper">
+        <div class="container">
+            <h2>Verifikasi Email Anda</h2>
+            <p>Halo <b>{{.CustomerName}}</b>,<br>Terima kasih telah mendaftar di Kartcis.ID. Klik tombol di bawah ini untuk memverifikasi alamat email Anda dan mengaktifkan akun Anda:</p>
+            
+            <a href="{{.VerifyURL}}" class="btn">Verifikasi Email Saya</a>
+            
+            <p style="margin-top: 24px; font-size: 14px;">Link ini berlaku selama 1 jam. Jika Anda tidak merasa mendaftar di Kartcis.ID, abaikan email ini.</p>
+        </div>
+        <div class="footer">
+            &copy; 2026 Kartcis.ID
+        </div>
+    </div>
+</body>
+</html>
+`

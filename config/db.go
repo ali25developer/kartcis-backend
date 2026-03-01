@@ -46,10 +46,11 @@ func ConnectDB() {
 		&models.SocialAccount{},
 		&models.OrderStatusHistory{},
 		&models.PasswordReset{},
-		&models.SiteSetting{},     // Added
-		&models.RequestLog{},      // Added for smart logging
-		&models.FlashSale{},       // Added for Flash Sale feature
-		&models.BankTransaction{}, // Added for Payment Tracking
+		&models.SiteSetting{},       // Added
+		&models.RequestLog{},        // Added for smart logging
+		&models.FlashSale{},         // Added for Flash Sale feature
+		&models.BankTransaction{},   // Added for Payment Tracking
+		&models.EmailVerification{}, // Added for Email Verification
 	)
 	if err != nil {
 		log.Println("Migration failed:", err)
@@ -106,6 +107,9 @@ func ConnectDB() {
 	}
 	if !DB.Migrator().HasTable(&models.PasswordReset{}) {
 		DB.Migrator().CreateTable(&models.PasswordReset{})
+	}
+	if !DB.Migrator().HasTable(&models.EmailVerification{}) {
+		DB.Migrator().CreateTable(&models.EmailVerification{})
 	}
 
 	// Manual Migration for Tickets

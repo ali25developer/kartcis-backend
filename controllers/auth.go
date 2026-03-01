@@ -56,17 +56,70 @@ func Register(c *gin.Context) {
 
 	config.DB.Create(&user)
 
-	// Generate Token
-	token, _ := generateToken(user)
+	// Create Email Verification Token
+	token, _ := generateRandomString(32)
+	verification := models.EmailVerification{
+		Email:     user.Email,
+		Token:     token,
+		ExpiresAt: time.Now().Add(1 * time.Hour),
+	}
+	config.DB.Create(&verification)
+
+	// Send Verification Email (Async)
+	go utils.SendEmailVerificationEmail(user.Email, user.Name, token)
+
+	// Generate JWT Token
+	jwtToken, _ := generateToken(user)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
 		"data": gin.H{
 			"user":       user,
-			"token":      token,
+			"token":      jwtToken,
 			"expires_in": 7200, // 2 hours
 		},
+		"message": "Registration successful. Please check your email to verify your account.",
 	})
+}
+
+// Verify Email
+func VerifyEmail(c *gin.Context) {
+	token := c.Query("token")
+	email := c.Query("email")
+
+	if token == "" || email == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Token and email are required"})
+		return
+	}
+
+	var verification models.EmailVerification
+	if err := config.DB.Where("email = ? AND token = ?", email, token).First(&verification).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Invalid verification link"})
+		return
+	}
+
+	if time.Now().After(verification.ExpiresAt) {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Verification link has expired"})
+		return
+	}
+
+	var user models.User
+	if err := config.DB.Where("email = ?", email).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "User not found"})
+		return
+	}
+
+	now := time.Now()
+	user.EmailVerifiedAt = &now
+	if err := config.DB.Save(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to verify email"})
+		return
+	}
+
+	// Delete used token
+	config.DB.Delete(&verification)
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Email verified successfully"})
 }
 
 func Login(c *gin.Context) {
