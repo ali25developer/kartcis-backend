@@ -122,6 +122,55 @@ func VerifyEmail(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Email verified successfully"})
 }
 
+// Resend Verification Email
+func ResendVerificationEmail(c *gin.Context) {
+	var input struct {
+		Email string `json:"email" binding:"required,email"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid email format"})
+		return
+	}
+
+	var user models.User
+	if err := config.DB.Where("email = ?", input.Email).First(&user).Error; err != nil {
+		// Do not reveal if email exists or not
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "If the email is registered and unverified, a new verification link has been sent."})
+		return
+	}
+
+	if user.EmailVerifiedAt != nil {
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "Email is already verified."})
+		return
+	}
+
+	// Anti-spam protection: 1 minute cooldown
+	var lastVerification models.EmailVerification
+	if err := config.DB.Where("email = ?", user.Email).Order("created_at desc").First(&lastVerification).Error; err == nil {
+		if time.Since(lastVerification.CreatedAt) < 1*time.Minute {
+			c.JSON(http.StatusTooManyRequests, gin.H{"success": false, "message": "Harap tunggu 1 menit sebelum mengirim ulang email."})
+			return
+		}
+	}
+
+	// Delete existing unexpired tokens
+	config.DB.Where("email = ?", user.Email).Delete(&models.EmailVerification{})
+
+	// Create Email Verification Token
+	token, _ := generateRandomString(32)
+	verification := models.EmailVerification{
+		Email:     user.Email,
+		Token:     token,
+		ExpiresAt: time.Now().Add(1 * time.Hour),
+	}
+	config.DB.Create(&verification)
+
+	// Send Verification Email (Async)
+	go utils.SendEmailVerificationEmail(user.Email, user.Name, token)
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Verifikasi ulang berhasil dikirim. Silakan cek email Anda."})
+}
+
 func Login(c *gin.Context) {
 	var input LoginInput
 	if err := c.ShouldBindJSON(&input); err != nil {
