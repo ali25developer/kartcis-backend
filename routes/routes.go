@@ -46,8 +46,9 @@ func SetupRouter() *gin.Engine {
 		auth.GET("/me", middleware.AuthMiddleware(), controllers.GetMe)
 		auth.PUT("/profile", middleware.AuthMiddleware(), controllers.UpdateProfile) // Added
 		auth.POST("/forgot-password", controllers.ForgotPassword)
-		auth.POST("/reset-password", controllers.ResetPassword) // Added
-		auth.GET("/verify-email", controllers.VerifyEmail)      // Added
+		auth.POST("/reset-password", controllers.ResetPassword)                // Added
+		auth.GET("/verify-email", controllers.VerifyEmail)                     // Added
+		auth.POST("/resend-verification", controllers.ResendVerificationEmail) // Added
 
 		// Google Auth
 		auth.GET("/google", controllers.GoogleLogin)
