@@ -112,6 +112,11 @@ func ConnectDB() {
 		DB.Migrator().CreateTable(&models.EmailVerification{})
 	}
 
+	// Manual Migration for TicketTypes
+	if !DB.Migrator().HasColumn(&models.TicketType{}, "max_purchase_per_user") {
+		DB.Migrator().AddColumn(&models.TicketType{}, "max_purchase_per_user")
+	}
+
 	// Manual Migration for Tickets
 	if !DB.Migrator().HasColumn(&models.Ticket{}, "purchased_price") {
 		DB.Migrator().AddColumn(&models.Ticket{}, "purchased_price")

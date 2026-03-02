@@ -76,6 +76,7 @@ func UpdateTicketType(c *gin.Context) {
 	ticketType.Price = input.Price
 	ticketType.Quota = input.Quota
 	ticketType.Description = input.Description
+	ticketType.MaxPurchasePerUser = input.MaxPurchasePerUser
 	ticketType.UpdatedAt = time.Now()
 
 	config.DB.Save(&ticketType)

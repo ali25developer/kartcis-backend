@@ -492,7 +492,7 @@ func UpdateEvent(c *gin.Context) {
 				}
 
 				if err := tx.Model(&models.TicketType{}).Where("id = ? AND event_id = ?", tt.ID, event.ID).
-					Select("Name", "Description", "Price", "OriginalPrice", "Quota", "Available").
+					Select("Name", "Description", "Price", "OriginalPrice", "Quota", "Available", "MaxPurchasePerUser").
 					Updates(tt).Error; err != nil {
 					tx.Rollback()
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to update ticket type"})

@@ -124,6 +124,28 @@ func CreateOrder(c *gin.Context) {
 			return
 		}
 
+		// --- CHECK MAX PURCHASE PER USER ---
+		if ticketType.MaxPurchasePerUser > 0 {
+			var alreadyPurchased int64
+			// Join with orders to check user's previous non-cancelled purchases
+			tx.Model(&models.Ticket{}).
+				Joins("JOIN orders ON orders.id = tickets.order_id").
+				Where("tickets.ticket_type_id = ? AND orders.status != ?", ticketType.ID, "cancelled").
+				Where("(orders.user_id = ? OR orders.customer_email = ?)", userID, customerEmail).
+				Count(&alreadyPurchased)
+
+			if int(alreadyPurchased)+item.Quantity > ticketType.MaxPurchasePerUser {
+				tx.Rollback()
+				remaining := ticketType.MaxPurchasePerUser - int(alreadyPurchased)
+				if remaining <= 0 {
+					c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": fmt.Sprintf("Maaf, Anda sudah mencapai batas maksimal pembelian untuk tiket '%s'.", ticketType.Name)})
+				} else {
+					c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": fmt.Sprintf("Maaf, Anda hanya bisa membeli %d tiket lagi untuk '%s'.", remaining, ticketType.Name)})
+				}
+				return
+			}
+		}
+
 		// --- FLASH SALE MODULE ---
 		// Determine active price: default to normal ticket price
 		activePrice := ticketType.Price
