@@ -316,6 +316,24 @@ func CreateOrder(c *gin.Context) {
 				valid = false
 			}
 
+			// NEW: Prevent multiple usage by same user/email
+			if valid {
+				var count int64
+				uq := tx.Model(&models.Order{}).Where("voucher_code = ? AND status != ?", req.VoucherCode, "cancelled")
+				if userID != nil {
+					uq = uq.Where("(user_id = ? OR customer_email = ?)", *userID, customerEmail)
+				} else {
+					uq = uq.Where("customer_email = ?", customerEmail)
+				}
+				uq.Count(&count)
+				if count > 0 {
+					valid = false
+					tx.Rollback()
+					c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Anda sudah pernah menggunakan voucher ini sebelumnya"})
+					return
+				}
+			}
+
 			// If event_id is specified, make sure it matches the current items
 			// For simplicity we check if the voucher applies to AT LEAST ONE item
 			if valid && (voucher.EventID != nil || voucher.TicketTypeID != nil) {
