@@ -12,8 +12,7 @@ import (
 type FlipBillRequest struct {
 	Title                 string `json:"title"`
 	Amount                int    `json:"amount"`
-	Type                  string `json:"type"`           // SINGLE
-	Step                  int    `json:"step,omitempty"` // v2: 1, 2, 3
+	Type                  string `json:"type"` // SINGLE
 	SenderName            string `json:"sender_name"`
 	SenderEmail           string `json:"sender_email"`
 	SenderPhoneNumber     string `json:"sender_phone_number"`
@@ -48,7 +47,6 @@ func CreateFlipBill(orderID string, amount int, name, email, phone, redirectURL 
 		Title:                 fmt.Sprintf("Pembayaran Order %s", orderID),
 		Amount:                amount,
 		Type:                  "SINGLE",
-		Step:                  2, // Skip contact info step as we provide it
 		SenderName:            name,
 		SenderEmail:           email,
 		SenderPhoneNumber:     phone,
