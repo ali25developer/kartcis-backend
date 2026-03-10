@@ -450,7 +450,11 @@ func CreateOrder(c *gin.Context) {
 
 	// Process Payment (Simulate Gateway)
 	// This function prepares the order for payment (generating VA, URLs, etc)
-	processPaymentGateway(&order, req.PaymentMethod, userID)
+	if err := processPaymentGateway(&order, req.PaymentMethod, userID); err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": err.Error()})
+		return
+	}
 
 	if err := tx.Create(&order).Error; err != nil {
 		tx.Rollback()
@@ -830,19 +834,23 @@ func UserCancelOrder(c *gin.Context) {
 // processPaymentGateway abstracts the payment generation logic.
 // In the future, replace the body of this function with actual API calls to Flip/Midtrans.
 // processPaymentGateway abstracts the payment generation logic.
-func processPaymentGateway(order *models.Order, paymentMethod string, userID *uint) {
+func processPaymentGateway(order *models.Order, paymentMethod string, userID *uint) error {
+	log.Printf("DEBUG: FLIP_API_KEY length: %d", len(os.Getenv("FLIP_API_KEY")))
+	log.Printf("DEBUG: FRONTEND_URL value: %s", os.Getenv("FRONTEND_URL"))
+
 	if os.Getenv("FLIP_API_KEY") != "" {
 		// Use Flip Bill
 		redirectURL := fmt.Sprintf("%s/payment/%s", os.Getenv("FRONTEND_URL"), order.OrderNumber)
 		resp, err := utils.CreateFlipBill(order.OrderNumber, int(order.TotalAmount), order.CustomerName, order.CustomerEmail, order.CustomerPhone, redirectURL)
-		if err == nil {
-			order.PaymentURL = resp.PaymentURL
-			order.PaymentData = fmt.Sprintf("Flip Link ID: %d, Bill ID: %d", resp.ID, resp.BillID)
-			order.PaymentInstructions = "Silakan klik link pembayaran Flip untuk menyelesaikan transaksi."
-			return
+		if err != nil {
+			// Jika pakai API Key tapi error, jangan lanjut ke mock, tapi laporkan errornya
+			return fmt.Errorf("Flip API Error: %v", err)
 		}
-		// Fallback to mock if API fails? Or log error?
-		log.Printf("Flip API Error for order %s: %v", order.OrderNumber, err)
+
+		order.PaymentURL = resp.PaymentURL
+		order.PaymentData = fmt.Sprintf("Flip Link ID: %d, Bill ID: %d", resp.ID, resp.BillID)
+		order.PaymentInstructions = "Silakan klik link pembayaran Flip untuk menyelesaikan transaksi."
+		return nil
 	}
 
 	// 1. Virtual Accounts (Mock Fallback)
@@ -869,18 +877,25 @@ func processPaymentGateway(order *models.Order, paymentMethod string, userID *ui
 		userIDPadded := fmt.Sprintf("%05d", idForVA)
 		timestamp := fmt.Sprintf("%06d", time.Now().Unix()%1000000)
 		order.VirtualAccountNumber = fmt.Sprintf("%s%s%s", bankCode, userIDPadded, timestamp)
-		return
+		return nil
 	}
 
 	// 2. QRIS/E-Wallet (Mock Fallback)
 	if strings.Contains(paymentMethod, "QRIS") || strings.Contains(paymentMethod, "OVO") || strings.Contains(paymentMethod, "Dana") {
 		order.PaymentURL = fmt.Sprintf("https://simulator.kartcis.id/pay/%s", order.OrderNumber)
-		return
+		return nil
 	}
 
 	// 4. Retail Outlet (Mock Fallback)
 	if strings.Contains(paymentMethod, "Alfamart") || strings.Contains(paymentMethod, "Indomaret") {
 		order.VirtualAccountNumber = fmt.Sprintf("ALFA-%d", time.Now().UnixNano()%100000000)
-		return
+		return nil
 	}
+
+	// Default Fallback for FLIP method if API Key missing
+	if order.PaymentURL == "" && (paymentMethod == "FLIP" || paymentMethod == "Flip") {
+		order.PaymentURL = fmt.Sprintf("https://simulator.kartcis.id/pay/%s", order.OrderNumber)
+	}
+
+	return nil
 }
