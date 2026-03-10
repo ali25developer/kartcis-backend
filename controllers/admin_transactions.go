@@ -3,7 +3,6 @@ package controllers
 import (
 	"fmt"
 	"kartcis-backend/config"
-	"kartcis-backend/jobs"
 	"kartcis-backend/models"
 	"kartcis-backend/utils"
 	"net/http"
@@ -512,14 +511,4 @@ func UpdateTransactionStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Transaction status updated", "data": order})
-}
-
-func AdminTriggerScraping(c *gin.Context) {
-	// Trigger the background job logic immediately
-	go jobs.CheckBankJagoEmails("Manual")
-
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Manual email scraping triggered. Check transaction logs in a few moments.",
-	})
 }

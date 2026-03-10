@@ -175,7 +175,6 @@ func SetupRouter() *gin.Engine {
 	superAdmin.Use(middleware.AuthMiddleware(), requireAdmin())
 	{
 		// System Actions
-		superAdmin.POST("/transactions/trigger-scraping", controllers.AdminTriggerScraping)
 
 		// Categories
 		superAdmin.GET("/categories", controllers.AdminGetCategories)

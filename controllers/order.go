@@ -3,6 +3,7 @@ package controllers
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -427,46 +428,8 @@ func CreateOrder(c *gin.Context) {
 		}
 	}
 
-	// Handle Unique Code for Manual Bank Transfer
+	// Unique code generation removed (System now uses Flip)
 	var uniqueCode int
-	if strings.HasPrefix(req.PaymentMethod, "BANK_TRANSFER_") || req.PaymentMethod == "MANUAL_JAGO" {
-		// Generate unique code and ensure TOTAL AMOUNT is unique for pending orders
-		baseAmount := totalAmount + totalAdminFee - discountAmount
-
-		// 1. Get ALL codes used in the last 3 hours (regardless of status)
-		// This creates a 'cooldown' so the same amount isn't reused too quickly,
-		// preventing the payment scraper from getting confused.
-		var usedCodes []int
-		threeHoursAgo := time.Now().Add(-3 * time.Hour)
-		tx.Model(&models.Order{}).
-			Where("created_at >= ? AND total_amount >= ? AND total_amount <= ?", threeHoursAgo, baseAmount+101, baseAmount+999).
-			Pluck("unique_code", &usedCodes)
-
-		// 2. Check Capacity
-		if len(usedCodes) >= 899 {
-			tx.Rollback()
-			c.JSON(http.StatusTooManyRequests, gin.H{
-				"success": false,
-				"message": "Maaf, sistem pembayaran untuk nominal ini sedang sangat penuh. Mohon coba 15-30 menit lagi.",
-			})
-			return
-		}
-
-		// 3. Find First Available Slot (Linear Search)
-		// Map for O(1) lookup
-		usedMap := make(map[int]bool)
-		for _, code := range usedCodes {
-			usedMap[code] = true
-		}
-
-		// Search 101 to 999
-		for code := 101; code <= 999; code++ {
-			if !usedMap[code] {
-				uniqueCode = code
-				break
-			}
-		}
-	}
 
 	// Create Order
 	order := models.Order{
@@ -705,7 +668,41 @@ func PayOrder(c *gin.Context) {
 
 // Payment Callback (Webhook)
 func PaymentCallback(c *gin.Context) {
-	// In real world, verify signature from Payment Gateway (Midtrans, Xendit, etc)
+	// Flip Callback detect
+	// Flip sends 'data' as string/JSON or 'data' field in JSON
+	// Also check X-Callback-Token header
+	callbackToken := os.Getenv("FLIP_WEBHOOK_TOKEN")
+	flipToken := c.GetHeader("X-Callback-Token")
+
+	// 1. Try Flip Payload
+	var flipData struct {
+		Data  string `json:"data"`
+		Token string `json:"token"`
+	}
+
+	if err := c.ShouldBindJSON(&flipData); err == nil && (flipData.Token == callbackToken || flipToken == callbackToken) {
+		// Proceed as Flip Call
+		var bill struct {
+			ExternalID string `json:"external_id"`
+			Status     string `json:"status"` // SUCCESSFUL, CANCELLED
+		}
+		if err := json.Unmarshal([]byte(flipData.Data), &bill); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid flip data"})
+			return
+		}
+
+		status := "pending"
+		if bill.Status == "SUCCESSFUL" {
+			status = "success"
+		} else if bill.Status == "CANCELLED" {
+			status = "failed"
+		}
+
+		processOrderPayment(bill.ExternalID, status, c)
+		return
+	}
+
+	// 2. Original Mock Callback (Fallback)
 	var input struct {
 		OrderNumber string `json:"order_number"`
 		Status      string `json:"status"` // success, failed
@@ -715,16 +712,20 @@ func PaymentCallback(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid input"})
 		return
 	}
+	processOrderPayment(input.OrderNumber, input.Status, c)
+}
 
+// Extracted internal function to process payment status
+func processOrderPayment(orderNumber string, status string, c *gin.Context) {
 	var order models.Order
-	if err := config.DB.Where("order_number = ?", input.OrderNumber).First(&order).Error; err != nil {
+	if err := config.DB.Where("order_number = ?", orderNumber).First(&order).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Order not found"})
 		return
 	}
 
 	tx := config.DB.Begin()
 
-	if input.Status == "success" {
+	if status == "success" || status == "SUCCESSFUL" || status == "paid" {
 		now := time.Now()
 		if err := tx.Model(&order).Updates(models.Order{
 			Status: "paid",
@@ -734,7 +735,7 @@ func PaymentCallback(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to update order status"})
 			return
 		}
-	} else if input.Status == "failed" {
+	} else if status == "failed" || status == "CANCELLED" || status == "expired" {
 		if err := tx.Model(&order).Updates(models.Order{
 			Status: "cancelled",
 		}).Error; err != nil {
@@ -752,15 +753,15 @@ func PaymentCallback(c *gin.Context) {
 	// Record history
 	tx.Create(&models.OrderStatusHistory{
 		OrderID:   order.ID,
-		Status:    input.Status,
-		Notes:     "Callback received: " + input.Status,
+		Status:    status,
+		Notes:     "Callback received: " + status,
 		CreatedAt: time.Now(),
 	})
 
 	tx.Commit()
 
 	// If status is paid, send email (Triggered outside transaction for performance)
-	if input.Status == "success" {
+	if status == "success" || status == "SUCCESSFUL" || status == "paid" {
 		var tickets []models.Ticket
 		config.DB.Preload("Event").Preload("TicketType").Where("order_id = ?", order.ID).Find(&tickets)
 		utils.SendTicketEmail(order, tickets)
@@ -828,11 +829,26 @@ func UserCancelOrder(c *gin.Context) {
 
 // processPaymentGateway abstracts the payment generation logic.
 // In the future, replace the body of this function with actual API calls to Flip/Midtrans.
+// processPaymentGateway abstracts the payment generation logic.
 func processPaymentGateway(order *models.Order, paymentMethod string, userID *uint) {
-	// 1. Virtual Accounts (BCA, Mandiri, BNI, BRI, etc.)
+	// Flip Integration (Default if API Key is set)
+	if os.Getenv("FLIP_API_KEY") != "" {
+		// Use Flip Bill
+		resp, err := utils.CreateFlipBill(order.OrderNumber, int(order.TotalAmount), order.CustomerName, order.CustomerEmail, order.CustomerPhone)
+		if err == nil {
+			order.PaymentURL = resp.PaymentURL
+			order.PaymentData = fmt.Sprintf("Flip Link ID: %d, Bill ID: %d", resp.ID, resp.BillID)
+			order.PaymentInstructions = "Silakan klik link pembayaran Flip untuk menyelesaikan transaksi."
+			return
+		}
+		// Fallback to mock if API fails? Or log error?
+		log.Printf("Flip API Error for order %s: %v", order.OrderNumber, err)
+	}
+
+	// 1. Virtual Accounts (Mock Fallback)
 	if strings.Contains(paymentMethod, "VA") {
-		// MOCK: Generate local VA Number
-		bankCode := "88888" // Default
+		// ... existing mock VA logic ... (shortened for clarity if it's the same)
+		bankCode := "88888"
 		if strings.Contains(paymentMethod, "BCA") {
 			bankCode = "70012"
 		} else if strings.Contains(paymentMethod, "Mandiri") {
@@ -840,60 +856,31 @@ func processPaymentGateway(order *models.Order, paymentMethod string, userID *ui
 		} else if strings.Contains(paymentMethod, "BNI") {
 			bankCode = "88881"
 		} else if strings.Contains(paymentMethod, "BRI") {
-			bankCode = "88882" // Example
+			bankCode = "88882"
 		}
 
 		idForVA := 0
 		if userID != nil {
 			idForVA = int(*userID)
 		} else {
-			idForVA = 99999 // Guest
+			idForVA = 99999
 		}
 
 		userIDPadded := fmt.Sprintf("%05d", idForVA)
 		timestamp := fmt.Sprintf("%06d", time.Now().Unix()%1000000)
-
 		order.VirtualAccountNumber = fmt.Sprintf("%s%s%s", bankCode, userIDPadded, timestamp)
-
-		// In Real Gateway:
-		// resp, _ := flip.CreateBill(amount, bankCode, ...)
-		// order.VirtualAccountNumber = resp.VANumber
-		// order.PaymentData = resp.RawJSON
 		return
 	}
 
-	// 2. E-Wallets / QRIS (OVO, Dana, ShopeePay, LinkAja)
+	// 2. QRIS/E-Wallet (Mock Fallback)
 	if strings.Contains(paymentMethod, "QRIS") || strings.Contains(paymentMethod, "OVO") || strings.Contains(paymentMethod, "Dana") {
-		// MOCK: Generate a Deep Link or QR String
-		// For simulation, we point to a dummy payment page or return a static QR string
-
-		// order.PaymentURL = "https://app.sandbox.midtrans.com/..."
-		// order.PaymentURL = "https://flip.id/pw/..."
-
-		// Let's just create a dummy link for now
 		order.PaymentURL = fmt.Sprintf("https://simulator.kartcis.id/pay/%s", order.OrderNumber)
 		return
 	}
-	// 3. Retail Outlet (Alfamart/Indomaret)
+
+	// 4. Retail Outlet (Mock Fallback)
 	if strings.Contains(paymentMethod, "Alfamart") || strings.Contains(paymentMethod, "Indomaret") {
-		// MOCK: Generate Payment Code
 		order.VirtualAccountNumber = fmt.Sprintf("ALFA-%d", time.Now().UnixNano()%100000000)
-		return
-	}
-
-	// 4. Bank Transfer (Jago)
-	if strings.Contains(paymentMethod, "BANK_TRANSFER_JAGO") || paymentMethod == "MANUAL_JAGO" {
-		// Set Payment Instruction
-		accNo := os.Getenv("JAGO_ACCOUNT_NUMBER")
-		accName := os.Getenv("JAGO_ACCOUNT_NAME")
-		if accNo == "" {
-			accNo = "1010101020" // Default Demo
-			accName = "Kartcis Demo Account"
-		}
-
-		order.VirtualAccountNumber = accNo
-		order.PaymentData = accName
-		order.PaymentInstructions = fmt.Sprintf("Silakan transfer ke Bank Jago: %s a/n %s. Pastikan nominal sampai 3 digit terakhir (Rp %v) agar dapat diverifikasi otomatis.", accNo, accName, utils.FormatPrice(order.TotalAmount))
 		return
 	}
 }
