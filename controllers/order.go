@@ -831,10 +831,10 @@ func UserCancelOrder(c *gin.Context) {
 // In the future, replace the body of this function with actual API calls to Flip/Midtrans.
 // processPaymentGateway abstracts the payment generation logic.
 func processPaymentGateway(order *models.Order, paymentMethod string, userID *uint) {
-	// Flip Integration (Default if API Key is set)
 	if os.Getenv("FLIP_API_KEY") != "" {
 		// Use Flip Bill
-		resp, err := utils.CreateFlipBill(order.OrderNumber, int(order.TotalAmount), order.CustomerName, order.CustomerEmail, order.CustomerPhone)
+		redirectURL := fmt.Sprintf("%s/payment/%s", os.Getenv("FRONTEND_URL"), order.OrderNumber)
+		resp, err := utils.CreateFlipBill(order.OrderNumber, int(order.TotalAmount), order.CustomerName, order.CustomerEmail, order.CustomerPhone, redirectURL)
 		if err == nil {
 			order.PaymentURL = resp.PaymentURL
 			order.PaymentData = fmt.Sprintf("Flip Link ID: %d, Bill ID: %d", resp.ID, resp.BillID)

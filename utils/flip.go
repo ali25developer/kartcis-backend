@@ -20,6 +20,7 @@ type FlipBillRequest struct {
 	SenderAddress         string `json:"sender_address"`
 	IsAddressRequired     int    `json:"is_address_required"`
 	IsPhoneNumberRequired int    `json:"is_phone_number_required"`
+	RedirectURL           string `json:"redirect_url,omitempty"`
 }
 
 type FlipBillResponse struct {
@@ -36,7 +37,7 @@ type FlipBillResponse struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
-func CreateFlipBill(orderID string, amount int, name, email, phone string) (*FlipBillResponse, error) {
+func CreateFlipBill(orderID string, amount int, name, email, phone, redirectURL string) (*FlipBillResponse, error) {
 	apiKey := os.Getenv("FLIP_API_KEY")
 	baseURL := os.Getenv("FLIP_BASE_URL")
 	if baseURL == "" {
@@ -47,11 +48,13 @@ func CreateFlipBill(orderID string, amount int, name, email, phone string) (*Fli
 		Title:                 fmt.Sprintf("Pembayaran Order %s", orderID),
 		Amount:                amount,
 		Type:                  "SINGLE",
+		Step:                  2, // Skip contact info step as we provide it
 		SenderName:            name,
 		SenderEmail:           email,
 		SenderPhoneNumber:     phone,
 		IsAddressRequired:     0,
 		IsPhoneNumberRequired: 0,
+		RedirectURL:           redirectURL,
 	}
 
 	jsonPayload, _ := json.Marshal(payload)
