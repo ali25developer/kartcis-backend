@@ -62,8 +62,8 @@ func CreateFlipBill(orderID string, amount int, name, email, phone, redirectURL 
 	}
 
 	if expiredAt != nil {
-		// Flip v2 Date format: YYYY-MM-DD HH:mm+0700
-		data.Set("expired_date", expiredAt.Format("2006-01-02 15:04-0700"))
+		// Flip v2 Date format: YYYY-MM-DD HH:mm (no timezone)
+		data.Set("expired_date", expiredAt.Format("2006-01-02 15:04"))
 	}
 
 	req, err := http.NewRequest("POST", baseURL+"/pwf/bill", strings.NewReader(data.Encode()))
