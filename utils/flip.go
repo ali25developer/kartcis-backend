@@ -54,7 +54,7 @@ func CreateFlipBill(orderID string, amount int, name, email, phone, redirectURL 
 		IsAddressRequired:     0,
 		IsPhoneNumberRequired: 0,
 		RedirectURL:           redirectURL,
-		Step:                  3, // v2: 1=input, 2=method, 3=confirmation
+		Step:                  1, // v2: 1=input, 2=method, 3=confirmation
 	}
 
 	jsonPayload, _ := json.Marshal(payload)

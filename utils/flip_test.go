@@ -33,7 +33,7 @@ func TestCreateFlipBill_Detailed(t *testing.T) {
 		assert.NoError(t, err)
 
 		// V2 specific checks
-		assert.Equal(t, 3, payload.Step)
+		assert.Equal(t, 1, payload.Step)
 		assert.Equal(t, "SINGLE", payload.Type)
 		assert.Equal(t, 0, payload.IsAddressRequired)
 		assert.Equal(t, 0, payload.IsPhoneNumberRequired)
@@ -107,4 +107,42 @@ func TestCreateFlipBill_ErrorHandling(t *testing.T) {
 	assert.Nil(t, resp)
 	assert.Contains(t, err.Error(), "VALIDATION_ERROR")
 	assert.Contains(t, err.Error(), "Param step is invalid")
+}
+
+func TestCreateFlipBill_Unauthorized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"code":"UNAUTHORIZED","message":"Invalid API Key"}`)
+	}))
+	defer server.Close()
+
+	os.Setenv("FLIP_API_KEY", "wrong_key")
+	os.Setenv("FLIP_BASE_URL", server.URL)
+	defer os.Unsetenv("FLIP_API_KEY")
+	defer os.Unsetenv("FLIP_BASE_URL")
+
+	resp, err := CreateFlipBill("ORD-AUTH", 1000, "User", "user@test.com", "081", "")
+
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	assert.Contains(t, err.Error(), "UNAUTHORIZED")
+}
+
+func TestCreateFlipBill_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, `Flip Server Exploded`)
+	}))
+	defer server.Close()
+
+	os.Setenv("FLIP_API_KEY", "test_key")
+	os.Setenv("FLIP_BASE_URL", server.URL)
+	defer os.Unsetenv("FLIP_API_KEY")
+	defer os.Unsetenv("FLIP_BASE_URL")
+
+	resp, err := CreateFlipBill("ORD-500", 1000, "User", "user@test.com", "081", "")
+
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+	assert.Contains(t, err.Error(), "status 500")
 }
