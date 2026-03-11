@@ -1,13 +1,14 @@
 package utils
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 )
 
 type FlipBillRequest struct {
@@ -44,31 +45,33 @@ func CreateFlipBill(orderID string, amount int, name, email, phone, redirectURL 
 		baseURL = "https://bigflip.id/api/v2" // Reverted to v2 for Sandbox
 	}
 
-	payload := FlipBillRequest{
-		Title:                 fmt.Sprintf("Pembayaran Order %s", orderID),
-		Amount:                amount,
-		Type:                  "SINGLE",
-		SenderName:            name,
-		SenderEmail:           email,
-		SenderPhoneNumber:     phone,
-		IsAddressRequired:     0,
-		IsPhoneNumberRequired: 0,
-		RedirectURL:           redirectURL,
+	data := url.Values{}
+	data.Set("title", fmt.Sprintf("Pembayaran Order %s", orderID))
+	data.Set("amount", fmt.Sprintf("%d", amount))
+	data.Set("type", "SINGLE")
+	data.Set("sender_name", name)
+	data.Set("sender_email", email)
+	data.Set("sender_phone_number", phone)
+	data.Set("is_address_required", "0")
+	data.Set("is_phone_number_required", "0")
+	data.Set("step", "2") // 2 = Skip identity screen (requires x-www-form-urlencoded)
+
+	if redirectURL != "" {
+		data.Set("redirect_url", redirectURL)
 	}
 
-	jsonPayload, _ := json.Marshal(payload)
-	req, err := http.NewRequest("POST", baseURL+"/pwf/bill", bytes.NewBuffer(jsonPayload))
+	req, err := http.NewRequest("POST", baseURL+"/pwf/bill", strings.NewReader(data.Encode()))
 	if err != nil {
 		return nil, err
 	}
 
 	req.SetBasicAuth(apiKey, "")
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	// Debug Logs
 	log.Printf("[Flip-Debug] Request URL: %s/pwf/bill", baseURL)
 	log.Printf("[Flip-Debug] Authorization: Basic (API Key present)") // Log presence of API key, not the key itself
-	log.Printf("[Flip-Debug] Payload: %s", string(jsonPayload))
+	log.Printf("[Flip-Debug] Payload: %s", data.Encode())
 
 	client := &http.Client{}
 	resp, err := client.Do(req)

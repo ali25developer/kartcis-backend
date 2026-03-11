@@ -25,25 +25,25 @@ func TestCreateFlipBill_Detailed(t *testing.T) {
 		assert.Equal(t, "", password)
 
 		// Verify Content-Type
-		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		assert.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
 
 		// Decode and verify payload
-		var payload FlipBillRequest
-		err := json.NewDecoder(r.Body).Decode(&payload)
+		err := r.ParseForm()
 		assert.NoError(t, err)
 
 		// V2 specific checks
-		assert.Equal(t, "SINGLE", payload.Type)
-		assert.Equal(t, 0, payload.IsAddressRequired)
-		assert.Equal(t, 0, payload.IsPhoneNumberRequired)
-		assert.Contains(t, payload.Title, "ORD-123")
+		assert.Equal(t, "SINGLE", r.FormValue("type"))
+		assert.Equal(t, "0", r.FormValue("is_address_required"))
+		assert.Equal(t, "0", r.FormValue("is_phone_number_required"))
+		assert.Contains(t, r.FormValue("title"), "ORD-123")
+		assert.Equal(t, "2", r.FormValue("step"))
 
 		// Return Mock Response
 		resp := FlipBillResponse{
 			ID:          12345,
 			BillID:      67890,
 			ExternalID:  "ORD-123",
-			Title:       payload.Title,
+			Title:       r.FormValue("title"),
 			Status:      "PENDING",
 			PaymentURL:  "https://flip.id/p/mock-link", // This field in JSON should be link_url
 			CreatedAt:   "2026-03-11 09:00",
