@@ -746,10 +746,21 @@ func PayOrder(c *gin.Context) {
 func PaymentCallback(c *gin.Context) {
 	callbackToken := os.Getenv("FLIP_WEBHOOK_TOKEN")
 
-	// Flip mengirim callback sebagai form-encoded dengan field "data" berisi JSON
+	// Flip mengirim callback sebagai form-encoded:
+	// data  = JSON string berisi detail bill
+	// token = validation token (form field TERPISAH, bukan di dalam JSON)
 	dataStr := c.PostForm("data")
+	tokenStr := c.PostForm("token") // ← token di sini, bukan di dalam JSON data
+
 	if dataStr == "" {
 		c.Status(http.StatusBadRequest)
+		return
+	}
+
+	// Validasi token (dari form field "token")
+	if callbackToken != "" && tokenStr != callbackToken {
+		log.Printf("[Flip-Callback] Invalid token received: %s", tokenStr)
+		c.Status(http.StatusUnauthorized)
 		return
 	}
 
@@ -757,24 +768,20 @@ func PaymentCallback(c *gin.Context) {
 		BillLinkID int64  `json:"bill_link_id"` // int64! Format berubah jadi 19 digit per April 10, 2026
 		Amount     string `json:"amount"`
 		Status     string `json:"status"`
-		Token      string `json:"token"`
 	}
 	if err := json.Unmarshal([]byte(dataStr), &bill); err != nil {
+		log.Printf("[Flip-Callback] Failed to parse data: %v", err)
 		c.Status(http.StatusBadRequest)
 		return
 	}
 
-	// Validasi token dari dalam data JSON
-	if callbackToken != "" && bill.Token != callbackToken {
-		c.Status(http.StatusUnauthorized)
-		return
-	}
+	log.Printf("[Flip-Callback] Received: bill_link_id=%d, status=%s", bill.BillLinkID, bill.Status)
 
 	// Lookup order by payment_data yang menyimpan bill_link_id
 	var order models.Order
 	if err := config.DB.Where("payment_data = ?", fmt.Sprintf("%d", bill.BillLinkID)).
 		First(&order).Error; err != nil {
-		// Return 200 agar Flip tidak retry terus (order mungkin sudah diproses atau tidak relevan)
+		// Return 200 agar Flip tidak retry terus
 		log.Printf("[Flip-Callback] Order not found for bill_link_id: %d", bill.BillLinkID)
 		c.Status(http.StatusOK)
 		return
@@ -789,7 +796,6 @@ func PaymentCallback(c *gin.Context) {
 	}
 
 	if status == "pending" {
-		// Status tidak dikenal, cukup acknowledge
 		c.Status(http.StatusOK)
 		return
 	}
