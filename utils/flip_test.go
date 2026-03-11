@@ -33,7 +33,6 @@ func TestCreateFlipBill_Detailed(t *testing.T) {
 		assert.NoError(t, err)
 
 		// V2 specific checks
-		assert.Equal(t, 1, payload.Step)
 		assert.Equal(t, "SINGLE", payload.Type)
 		assert.Equal(t, 0, payload.IsAddressRequired)
 		assert.Equal(t, 0, payload.IsPhoneNumberRequired)

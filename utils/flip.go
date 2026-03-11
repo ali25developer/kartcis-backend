@@ -21,7 +21,6 @@ type FlipBillRequest struct {
 	IsAddressRequired     int    `json:"is_address_required"`
 	IsPhoneNumberRequired int    `json:"is_phone_number_required"`
 	RedirectURL           string `json:"redirect_url,omitempty"`
-	Step                  int    `json:"step"` // v2 requires int: 1, 2, or 3
 }
 
 type FlipBillResponse struct {
@@ -55,7 +54,6 @@ func CreateFlipBill(orderID string, amount int, name, email, phone, redirectURL 
 		IsAddressRequired:     0,
 		IsPhoneNumberRequired: 0,
 		RedirectURL:           redirectURL,
-		Step:                  1, // v2: 1=input, 2=method, 3=confirmation
 	}
 
 	jsonPayload, _ := json.Marshal(payload)
