@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 )
@@ -66,14 +67,23 @@ func CreateFlipBill(orderID string, amount int, name, email, phone, redirectURL 
 	req.SetBasicAuth(apiKey, "")
 	req.Header.Set("Content-Type", "application/json")
 
+	// Debug Logs
+	log.Printf("[Flip-Debug] Request URL: %s/pwf/bill", baseURL)
+	log.Printf("[Flip-Debug] Authorization: Basic (API Key present)") // Log presence of API key, not the key itself
+	log.Printf("[Flip-Debug] Payload: %s", string(jsonPayload))
+
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
+		log.Printf("[Flip-Debug] Connection Error: %v", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
+	log.Printf("[Flip-Debug] Response Status: %d", resp.StatusCode)
+	log.Printf("[Flip-Debug] Response Body: %s", string(body))
+
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return nil, fmt.Errorf("flip api error: %s (status %d)", string(body), resp.StatusCode)
 	}
