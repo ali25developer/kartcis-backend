@@ -3,7 +3,6 @@ package controllers
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -672,26 +671,48 @@ func PayOrder(c *gin.Context) {
 
 // Payment Callback (Webhook)
 func PaymentCallback(c *gin.Context) {
-	// Flip Callback detect
-	// Flip sends 'data' as string/JSON or 'data' field in JSON
-	// Also check X-Callback-Token header
 	callbackToken := os.Getenv("FLIP_WEBHOOK_TOKEN")
 	flipToken := c.GetHeader("X-Callback-Token")
 
-	// 1. Try Flip Payload
+	// Flip sends 'data' as string/JSON or 'data' field in JSON
+	dataStr := c.PostForm("data")
+	tokenStr := c.PostForm("token")
+
+	// 1. Try Flip Payload (Form Data)
+	if dataStr != "" && (tokenStr == callbackToken || flipToken == callbackToken || callbackToken == "") {
+		var bill struct {
+			ExternalID string `json:"external_id"`
+			Status     string `json:"status"` // SUCCESSFUL, CANCELLED
+		}
+		if err := json.Unmarshal([]byte(dataStr), &bill); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid flip data"})
+			return
+		}
+
+		status := "pending"
+		if bill.Status == "SUCCESSFUL" {
+			status = "success"
+		} else if bill.Status == "CANCELLED" {
+			status = "failed"
+		}
+
+		processOrderPayment(bill.ExternalID, status, c)
+		return
+	}
+
+	// 1b. Try Flip Payload (JSON Data)
 	var flipData struct {
 		Data  string `json:"data"`
 		Token string `json:"token"`
 	}
 
-	if err := c.ShouldBindJSON(&flipData); err == nil && (flipData.Token == callbackToken || flipToken == callbackToken) {
-		// Proceed as Flip Call
+	if err := c.ShouldBindJSON(&flipData); err == nil && flipData.Data != "" && (flipData.Token == callbackToken || flipToken == callbackToken || callbackToken == "") {
 		var bill struct {
 			ExternalID string `json:"external_id"`
 			Status     string `json:"status"` // SUCCESSFUL, CANCELLED
 		}
 		if err := json.Unmarshal([]byte(flipData.Data), &bill); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid flip data"})
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid flip data json"})
 			return
 		}
 
@@ -712,11 +733,18 @@ func PaymentCallback(c *gin.Context) {
 		Status      string `json:"status"` // success, failed
 	}
 
-	if err := c.ShouldBindJSON(&input); err != nil {
+	// Using c.Bind to handle remaining body parses if it's the mock format
+	if err := c.ShouldBindJSON(&input); err != nil && input.OrderNumber == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid input"})
 		return
 	}
-	processOrderPayment(input.OrderNumber, input.Status, c)
+
+	if input.OrderNumber != "" {
+		processOrderPayment(input.OrderNumber, input.Status, c)
+		return
+	}
+
+	c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Unsupported payload"})
 }
 
 // Extracted internal function to process payment status
@@ -816,7 +844,7 @@ func UserCancelOrder(c *gin.Context) {
 	}
 
 	// Record history
-	config.DB.Create(&models.OrderStatusHistory{
+	tx.Create(&models.OrderStatusHistory{
 		OrderID:   order.ID,
 		Status:    "cancelled",
 		Notes:     "Cancelled by user",
@@ -835,9 +863,6 @@ func UserCancelOrder(c *gin.Context) {
 // In the future, replace the body of this function with actual API calls to Flip/Midtrans.
 // processPaymentGateway abstracts the payment generation logic.
 func processPaymentGateway(order *models.Order, paymentMethod string, userID *uint) error {
-	log.Printf("DEBUG: FLIP_API_KEY length: %d", len(os.Getenv("FLIP_API_KEY")))
-	log.Printf("DEBUG: FRONTEND_URL value: %s", os.Getenv("FRONTEND_URL"))
-
 	if os.Getenv("FLIP_API_KEY") != "" {
 		// Use Flip Bill
 		redirectURL := fmt.Sprintf("%s/payment/%s", os.Getenv("FRONTEND_URL"), order.OrderNumber)
