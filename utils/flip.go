@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 )
 
 type FlipBillRequest struct {
@@ -38,7 +39,7 @@ type FlipBillResponse struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
-func CreateFlipBill(orderID string, amount int, name, email, phone, redirectURL string) (*FlipBillResponse, error) {
+func CreateFlipBill(orderID string, amount int, name, email, phone, redirectURL string, expiredAt *time.Time) (*FlipBillResponse, error) {
 	apiKey := os.Getenv("FLIP_API_KEY")
 	baseURL := os.Getenv("FLIP_BASE_URL")
 	if baseURL == "" {
@@ -58,6 +59,11 @@ func CreateFlipBill(orderID string, amount int, name, email, phone, redirectURL 
 
 	if redirectURL != "" {
 		data.Set("redirect_url", redirectURL)
+	}
+
+	if expiredAt != nil {
+		// Flip v2 Date format: YYYY-MM-DD HH:mm+0700
+		data.Set("expired_date", expiredAt.Format("2006-01-02 15:04-0700"))
 	}
 
 	req, err := http.NewRequest("POST", baseURL+"/pwf/bill", strings.NewReader(data.Encode()))
