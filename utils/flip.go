@@ -17,9 +17,10 @@ type FlipBillRequest struct {
 	SenderEmail           string `json:"sender_email"`
 	SenderPhoneNumber     string `json:"sender_phone_number"`
 	SenderAddress         string `json:"sender_address"`
-	IsAddressRequired     int    `json:"is_address_required"`
-	IsPhoneNumberRequired int    `json:"is_phone_number_required"`
+	IsAddressRequired     bool   `json:"is_address_required"`
+	IsPhoneNumberRequired bool   `json:"is_phone_number_required"`
 	RedirectURL           string `json:"redirect_url,omitempty"`
+	Step                  string `json:"step"` // checkout, checkout_seamless, direct_api
 }
 
 type FlipBillResponse struct {
@@ -30,8 +31,8 @@ type FlipBillResponse struct {
 	SenderName  string `json:"sender_name"`
 	SenderEmail string `json:"sender_email"`
 	Amount      int    `json:"amount"`
-	Status      string `json:"status"`   // PENDING, SUCCESSFUL, CANCELLED
-	PaymentURL  string `json:"link_url"` // v2 uses link_url
+	Status      string `json:"status"`      // PENDING, SUCCESSFUL, CANCELLED
+	PaymentURL  string `json:"payment_url"` // v3 uses payment_url
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
 }
@@ -40,7 +41,7 @@ func CreateFlipBill(orderID string, amount int, name, email, phone, redirectURL 
 	apiKey := os.Getenv("FLIP_API_KEY")
 	baseURL := os.Getenv("FLIP_BASE_URL")
 	if baseURL == "" {
-		baseURL = "https://bigflip.id/api/v2" // Reverted to v2
+		baseURL = "https://bigflip.id/api/v3" // Upgraded to v3
 	}
 
 	payload := FlipBillRequest{
@@ -50,9 +51,10 @@ func CreateFlipBill(orderID string, amount int, name, email, phone, redirectURL 
 		SenderName:            name,
 		SenderEmail:           email,
 		SenderPhoneNumber:     phone,
-		IsAddressRequired:     0,
-		IsPhoneNumberRequired: 0,
+		IsAddressRequired:     false,
+		IsPhoneNumberRequired: false,
 		RedirectURL:           redirectURL,
+		Step:                  "checkout_seamless",
 	}
 
 	jsonPayload, _ := json.Marshal(payload)
