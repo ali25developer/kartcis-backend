@@ -46,11 +46,13 @@ func ConnectDB() {
 		&models.SocialAccount{},
 		&models.OrderStatusHistory{},
 		&models.PasswordReset{},
-		&models.SiteSetting{},       // Added
-		&models.RequestLog{},        // Added for smart logging
-		&models.FlashSale{},         // Added for Flash Sale feature
-		&models.BankTransaction{},   // Added for Payment Tracking
-		&models.EmailVerification{}, // Added for Email Verification
+		&models.SiteSetting{},        // Added
+		&models.RequestLog{},         // Added for smart logging
+		&models.FlashSale{},          // Added for Flash Sale feature
+		&models.BankTransaction{},    // Added for Payment Tracking
+		&models.EmailVerification{},  // Added for Email Verification
+		&models.ReferralCode{},       // Added for Referral Module
+		&models.ReferralCommission{}, // Added for Referral Commission
 	)
 	if err != nil {
 		log.Println("Migration failed:", err)
@@ -76,6 +78,9 @@ func ConnectDB() {
 	}
 	if !DB.Migrator().HasColumn(&models.Order{}, "voucher_code") {
 		DB.Migrator().AddColumn(&models.Order{}, "voucher_code")
+	}
+	if !DB.Migrator().HasColumn(&models.Order{}, "referral_code") {
+		DB.Migrator().AddColumn(&models.Order{}, "referral_code")
 	}
 
 	// Manual Migration for Multi-Role Features

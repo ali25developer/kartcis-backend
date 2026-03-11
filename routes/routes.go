@@ -88,7 +88,8 @@ func SetupRouter() *gin.Engine {
 	// So if I rename route param to :order_number, I must update controller too.
 
 	// Orders (Guest or Auth)
-	v1.GET("/vouchers/validate", controllers.ValidateVoucher) // Public access for checking codes
+	v1.GET("/vouchers/validate", controllers.ValidateVoucher)       // Public access for checking codes
+	v1.GET("/referrals/validate", controllers.ValidateReferralCode) // Public: validate referral code
 	v1.POST("/orders", middleware.OptionalAuthMiddleware(), controllers.CreateOrder)
 	v1.GET("/orders/:order_number", middleware.OptionalAuthMiddleware(), controllers.GetOrderDetail)
 	v1.GET("/orders/:order_number/tickets", middleware.OptionalAuthMiddleware(), controllers.GetOrderTickets)
@@ -144,6 +145,16 @@ func SetupRouter() *gin.Engine {
 		admin.POST("/flash-sales", controllers.CreateFlashSale)
 		admin.PUT("/flash-sales/:id", controllers.UpdateFlashSale)
 		admin.DELETE("/flash-sales/:id", controllers.DeleteFlashSale)
+
+		// Referral Codes (Scoped: Admin can manage all, Organizer can manage their own)
+		admin.GET("/referrals", controllers.AdminGetReferralCodes)
+		admin.POST("/referrals", controllers.CreateReferralCode)
+		admin.GET("/referrals/commissions", controllers.AdminGetCommissions)
+		admin.GET("/referrals/:id", controllers.GetReferralCodeDetail)
+		admin.PUT("/referrals/:id", controllers.UpdateReferralCode)
+		admin.DELETE("/referrals/:id", controllers.DeleteReferralCode)
+		admin.PATCH("/referrals/:id/status", controllers.UpdateReferralCodeStatus)
+		admin.PATCH("/referrals/commissions/:id/status", controllers.UpdateCommissionStatus)
 
 		// Dashboard (Scoped)
 		admin.GET("/stats", controllers.AdminGetStats)

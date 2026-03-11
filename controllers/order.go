@@ -29,7 +29,8 @@ type CheckoutRequest struct {
 		} `json:"attendees"`
 	} `json:"items"`
 	PaymentMethod string `json:"payment_method"`
-	VoucherCode   string `json:"voucher_code"` // Added for discount
+	VoucherCode   string `json:"voucher_code"`  // Added for voucher discount
+	ReferralCode  string `json:"referral_code"` // Added for referral/affiliate
 	// Guest Info (Optional if logged in)
 	CustomerInfo struct {
 		Name  string `json:"name"`
@@ -427,6 +428,52 @@ func CreateOrder(c *gin.Context) {
 		}
 	}
 
+	// Referral Code Processing
+	var referralDiscount float64
+	var appliedReferralCode string
+
+	if req.ReferralCode != "" {
+		rCode := strings.ToUpper(strings.TrimSpace(req.ReferralCode))
+		var referral models.ReferralCode
+		if err := tx.Where("code = ? AND is_active = true", rCode).First(&referral).Error; err == nil {
+			rValid := true
+			if referral.ExpiresAt != nil && referral.ExpiresAt.Before(time.Now()) {
+				rValid = false
+			}
+			if referral.MaxUses > 0 && referral.UsedCount >= referral.MaxUses {
+				rValid = false
+			}
+			// Event scope: at least one ticket must belong to referral's event
+			if rValid && referral.EventID != nil {
+				eventFound := false
+				for _, t := range orderItems {
+					if t.EventID == *referral.EventID {
+						eventFound = true
+						break
+					}
+				}
+				if !eventFound {
+					rValid = false
+				}
+			}
+
+			if rValid {
+				// Discount for buyer
+				if referral.DiscountType == "percent" && referral.DiscountValue > 0 {
+					referralDiscount = totalAmount * (referral.DiscountValue / 100)
+				} else if referral.DiscountType == "fixed" && referral.DiscountValue > 0 {
+					referralDiscount = referral.DiscountValue
+					if referralDiscount > totalAmount {
+						referralDiscount = totalAmount
+					}
+				}
+				appliedReferralCode = referral.Code
+				// Increment used_count
+				tx.Model(&referral).Update("used_count", gorm.Expr("used_count + ?", 1))
+			}
+		}
+	}
+
 	// Unique code generation removed (System now uses Flip)
 	var uniqueCode int
 
@@ -437,10 +484,11 @@ func CreateOrder(c *gin.Context) {
 		CustomerName:   customerName,
 		CustomerEmail:  customerEmail,
 		CustomerPhone:  customerPhone,
-		TotalAmount:    totalAmount + totalAdminFee - discountAmount + float64(uniqueCode), // Add fee, unique code, subtract discount
+		TotalAmount:    totalAmount + totalAdminFee - discountAmount - referralDiscount + float64(uniqueCode),
 		AdminFee:       totalAdminFee,
-		DiscountAmount: discountAmount,
+		DiscountAmount: discountAmount + referralDiscount, // Combined discount
 		VoucherCode:    appliedVoucherCode,
+		ReferralCode:   appliedReferralCode,
 		UniqueCode:     uniqueCode,
 		Status:         "pending",
 		PaymentMethod:  req.PaymentMethod,
@@ -468,6 +516,30 @@ func CreateOrder(c *gin.Context) {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to generate tickets"})
 			return
+		}
+	}
+
+	// Record Referral Commission AFTER order ID is available
+	if appliedReferralCode != "" {
+		var referral models.ReferralCode
+		if err := tx.Where("code = ?", appliedReferralCode).First(&referral).Error; err == nil {
+			var commissionAmount float64
+			base := totalAmount // Based on ticket subtotal before fees/discounts
+			if referral.RewardType == "percent" && referral.RewardValue > 0 {
+				commissionAmount = base * (referral.RewardValue / 100)
+			} else if referral.RewardType == "fixed" && referral.RewardValue > 0 {
+				commissionAmount = referral.RewardValue
+			}
+			if commissionAmount > 0 {
+				commission := models.ReferralCommission{
+					ReferralCodeID:   referral.ID,
+					MarketerID:       referral.UserID,
+					OrderID:          order.ID,
+					CommissionAmount: commissionAmount,
+					Status:           "pending",
+				}
+				tx.Create(&commission)
+			}
 		}
 	}
 
@@ -865,8 +937,13 @@ func UserCancelOrder(c *gin.Context) {
 func processPaymentGateway(order *models.Order, paymentMethod string, userID *uint) error {
 	if os.Getenv("FLIP_API_KEY") != "" {
 		// Use Flip Bill
+		expiryTime := order.CreatedAt.Add(24 * time.Hour)
+		if order.ExpiresAt != nil {
+			expiryTime = *order.ExpiresAt
+		}
+
 		redirectURL := fmt.Sprintf("%s/payment/%s", os.Getenv("FRONTEND_URL"), order.OrderNumber)
-		resp, err := utils.CreateFlipBill(order.OrderNumber, int(order.TotalAmount), order.CustomerName, order.CustomerEmail, order.CustomerPhone, redirectURL)
+		resp, err := utils.CreateFlipBill(order.OrderNumber, int(order.TotalAmount), order.CustomerName, order.CustomerEmail, order.CustomerPhone, redirectURL, &expiryTime)
 		if err != nil {
 			// Jika pakai API Key tapi error, jangan lanjut ke mock, tapi laporkan errornya
 			return fmt.Errorf("Flip API Error: %v", err)

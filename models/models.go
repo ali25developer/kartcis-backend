@@ -139,6 +139,7 @@ type Order struct {
 	AdminFee             float64    `json:"admin_fee"`
 	DiscountAmount       float64    `json:"discount_amount"` // New field
 	VoucherCode          string     `json:"voucher_code"`    // New field
+	ReferralCode         string     `json:"referral_code"`   // New field for Referral Code
 	UniqueCode           int        `json:"unique_code"`
 	Status               string     `json:"status"`
 	PaymentMethod        string     `json:"payment_method"`
@@ -240,4 +241,37 @@ type BankTransaction struct {
 	TransactionDate time.Time `json:"transaction_date"`
 	RawData         string    `json:"raw_data"`
 	CreatedAt       time.Time `json:"created_at"`
+}
+
+type ReferralCode struct {
+	ID            uint       `gorm:"primaryKey" json:"id"`
+	Code          string     `gorm:"uniqueIndex" json:"code"`
+	UserID        uint       `json:"user_id"` // Marketer
+	User          User       `json:"user" gorm:"foreignKey:UserID"`
+	EventID       *uint      `json:"event_id"` // Optional: limit to specific event
+	Event         *Event     `json:"event,omitempty" gorm:"foreignKey:EventID"`
+	RewardType    string     `json:"reward_type"`   // "percent" or "fixed"
+	RewardValue   float64    `json:"reward_value"`  // Commission amount or percentage
+	DiscountType  string     `json:"discount_type"` // "percent", "fixed", or "none"
+	DiscountValue float64    `json:"discount_value"`
+	MaxUses       int        `json:"max_uses"` // 0 for unlimited
+	UsedCount     int        `json:"used_count"`
+	ExpiresAt     *time.Time `json:"expires_at"`
+	IsActive      bool       `json:"is_active" gorm:"default:true"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+}
+
+type ReferralCommission struct {
+	ID               uint         `gorm:"primaryKey" json:"id"`
+	ReferralCodeID   uint         `json:"referral_code_id"`
+	ReferralCode     ReferralCode `json:"referral_code" gorm:"foreignKey:ReferralCodeID"`
+	MarketerID       uint         `json:"marketer_id"`
+	Marketer         User         `json:"marketer" gorm:"foreignKey:MarketerID"`
+	OrderID          uint         `json:"order_id"`
+	Order            Order        `json:"-" gorm:"foreignKey:OrderID"`
+	CommissionAmount float64      `json:"commission_amount"`
+	Status           string       `json:"status"` // pending, paid, cancelled
+	CreatedAt        time.Time    `json:"created_at"`
+	UpdatedAt        time.Time    `json:"updated_at"`
 }
