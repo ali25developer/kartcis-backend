@@ -3,6 +3,7 @@ package controllers
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -741,82 +742,59 @@ func PayOrder(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": order})
 }
 
-// Payment Callback (Webhook)
+// Payment Callback (Webhook dari Flip)
 func PaymentCallback(c *gin.Context) {
 	callbackToken := os.Getenv("FLIP_WEBHOOK_TOKEN")
-	flipToken := c.GetHeader("X-Callback-Token")
 
-	// Flip sends 'data' as string/JSON or 'data' field in JSON
+	// Flip mengirim callback sebagai form-encoded dengan field "data" berisi JSON
 	dataStr := c.PostForm("data")
-	tokenStr := c.PostForm("token")
-
-	// 1. Try Flip Payload (Form Data)
-	if dataStr != "" && (tokenStr == callbackToken || flipToken == callbackToken || callbackToken == "") {
-		var bill struct {
-			ExternalID string `json:"external_id"`
-			Status     string `json:"status"` // SUCCESSFUL, CANCELLED
-		}
-		if err := json.Unmarshal([]byte(dataStr), &bill); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid flip data"})
-			return
-		}
-
-		status := "pending"
-		if bill.Status == "SUCCESSFUL" {
-			status = "success"
-		} else if bill.Status == "CANCELLED" {
-			status = "failed"
-		}
-
-		processOrderPayment(bill.ExternalID, status, c)
+	if dataStr == "" {
+		c.Status(http.StatusBadRequest)
 		return
 	}
 
-	// 1b. Try Flip Payload (JSON Data)
-	var flipData struct {
-		Data  string `json:"data"`
-		Token string `json:"token"`
+	var bill struct {
+		BillLinkID int64  `json:"bill_link_id"` // int64! Format berubah jadi 19 digit per April 10, 2026
+		Amount     string `json:"amount"`
+		Status     string `json:"status"`
+		Token      string `json:"token"`
 	}
-
-	if err := c.ShouldBindJSON(&flipData); err == nil && flipData.Data != "" && (flipData.Token == callbackToken || flipToken == callbackToken || callbackToken == "") {
-		var bill struct {
-			ExternalID string `json:"external_id"`
-			Status     string `json:"status"` // SUCCESSFUL, CANCELLED
-		}
-		if err := json.Unmarshal([]byte(flipData.Data), &bill); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid flip data json"})
-			return
-		}
-
-		status := "pending"
-		if bill.Status == "SUCCESSFUL" {
-			status = "success"
-		} else if bill.Status == "CANCELLED" {
-			status = "failed"
-		}
-
-		processOrderPayment(bill.ExternalID, status, c)
+	if err := json.Unmarshal([]byte(dataStr), &bill); err != nil {
+		c.Status(http.StatusBadRequest)
 		return
 	}
 
-	// 2. Original Mock Callback (Fallback)
-	var input struct {
-		OrderNumber string `json:"order_number"`
-		Status      string `json:"status"` // success, failed
-	}
-
-	// Using c.Bind to handle remaining body parses if it's the mock format
-	if err := c.ShouldBindJSON(&input); err != nil && input.OrderNumber == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid input"})
+	// Validasi token dari dalam data JSON
+	if callbackToken != "" && bill.Token != callbackToken {
+		c.Status(http.StatusUnauthorized)
 		return
 	}
 
-	if input.OrderNumber != "" {
-		processOrderPayment(input.OrderNumber, input.Status, c)
+	// Lookup order by payment_data yang menyimpan bill_link_id
+	var order models.Order
+	if err := config.DB.Where("payment_data = ?", fmt.Sprintf("%d", bill.BillLinkID)).
+		First(&order).Error; err != nil {
+		// Return 200 agar Flip tidak retry terus (order mungkin sudah diproses atau tidak relevan)
+		log.Printf("[Flip-Callback] Order not found for bill_link_id: %d", bill.BillLinkID)
+		c.Status(http.StatusOK)
 		return
 	}
 
-	c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Unsupported payload"})
+	status := "pending"
+	switch bill.Status {
+	case "SUCCESSFUL":
+		status = "paid"
+	case "CANCELLED", "FAILED":
+		status = "cancelled"
+	}
+
+	if status == "pending" {
+		// Status tidak dikenal, cukup acknowledge
+		c.Status(http.StatusOK)
+		return
+	}
+
+	processOrderPayment(order.OrderNumber, status, c)
 }
 
 // Extracted internal function to process payment status
@@ -950,7 +928,7 @@ func processPaymentGateway(order *models.Order, paymentMethod string, userID *ui
 		}
 
 		order.PaymentURL = resp.PaymentURL
-		order.PaymentData = fmt.Sprintf("Flip Link ID: %d, Bill ID: %d", resp.ID, resp.BillID)
+		order.PaymentData = fmt.Sprintf("%d", resp.ID) // Simpan hanya link_id untuk lookup callback
 		order.PaymentInstructions = "Silakan klik link pembayaran Flip untuk menyelesaikan transaksi."
 		return nil
 	}
