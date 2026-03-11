@@ -32,11 +32,11 @@ func TestCreateFlipBill_Detailed(t *testing.T) {
 		err := json.NewDecoder(r.Body).Decode(&payload)
 		assert.NoError(t, err)
 
-		// V3 specific checks
-		assert.Equal(t, "checkout_seamless", payload.Step)
+		// V2 specific checks
+		assert.Equal(t, 3, payload.Step)
 		assert.Equal(t, "SINGLE", payload.Type)
-		assert.False(t, payload.IsAddressRequired)
-		assert.False(t, payload.IsPhoneNumberRequired)
+		assert.Equal(t, 0, payload.IsAddressRequired)
+		assert.Equal(t, 0, payload.IsPhoneNumberRequired)
 		assert.Contains(t, payload.Title, "ORD-123")
 
 		// Return Mock Response
@@ -46,11 +46,21 @@ func TestCreateFlipBill_Detailed(t *testing.T) {
 			ExternalID:  "ORD-123",
 			Title:       payload.Title,
 			Status:      "PENDING",
-			PaymentURL:  "https://flip.id/p/mock-link",
+			PaymentURL:  "https://flip.id/p/mock-link", // This field in JSON should be link_url
 			CreatedAt:   "2026-03-11 09:00",
 		}
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(resp)
+		// Custom JSON encoding to send link_url (v2) instead of payment_url (v3)
+		jsonResp := map[string]interface{}{
+			"link_id":     resp.ID,
+			"bill_id":     resp.BillID,
+			"external_id": resp.ExternalID,
+			"title":       resp.Title,
+			"status":      resp.Status,
+			"link_url":    resp.PaymentURL,
+			"created_at":  resp.CreatedAt,
+		}
+		json.NewEncoder(w).Encode(jsonResp)
 	}))
 	defer server.Close()
 
