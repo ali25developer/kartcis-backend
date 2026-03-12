@@ -766,7 +766,7 @@ func PaymentCallback(c *gin.Context) {
 
 	var bill struct {
 		BillLinkID int64  `json:"bill_link_id"` // int64! Format berubah jadi 19 digit per April 10, 2026
-		Amount     string `json:"amount"`
+		Amount     int    `json:"amount"` // Flip sends amount as a number
 		Status     string `json:"status"`
 	}
 	if err := json.Unmarshal([]byte(dataStr), &bill); err != nil {
@@ -779,7 +779,8 @@ func PaymentCallback(c *gin.Context) {
 
 	// Lookup order by payment_data yang menyimpan bill_link_id
 	var order models.Order
-	if err := config.DB.Where("payment_data = ?", fmt.Sprintf("%d", bill.BillLinkID)).
+	searchString := fmt.Sprintf("Flip Link ID: %d,%%", bill.BillLinkID)
+	if err := config.DB.Where("payment_data LIKE ?", searchString).
 		First(&order).Error; err != nil {
 		// Return 200 agar Flip tidak retry terus
 		log.Printf("[Flip-Callback] Order not found for bill_link_id: %d", bill.BillLinkID)
