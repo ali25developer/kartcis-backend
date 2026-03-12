@@ -79,14 +79,14 @@ func TestCreateOrder_WithUserPayload(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusCreated, w.Code)
-	
+
 	var response map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &response)
 	assert.True(t, response["success"].(bool))
-	
+
 	data := response["data"].(map[string]interface{})
 	assert.Equal(t, "https://flip.id/mock", data["payment_url"])
-	assert.Contains(t, data["payment_data"], "Flip Link ID: 123")
+	assert.Equal(t, "123", data["payment_data"]) // payment_data menyimpan link_id sebagai string
 }
 
 func TestCreateOrder_FlipFailure(t *testing.T) {
@@ -131,7 +131,7 @@ func TestCreateOrder_FlipFailure(t *testing.T) {
 
 	// In current code, Flip error returns 500
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	
+
 	var response map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &response)
 	assert.False(t, response["success"].(bool))

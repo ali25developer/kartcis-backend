@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -40,13 +41,13 @@ func TestCreateFlipBill_Detailed(t *testing.T) {
 
 		// Return Mock Response
 		resp := FlipBillResponse{
-			ID:          12345,
-			BillID:      67890,
-			ExternalID:  "ORD-123",
-			Title:       r.FormValue("title"),
-			Status:      "PENDING",
-			PaymentURL:  "https://flip.id/p/mock-link", // This field in JSON should be link_url
-			CreatedAt:   "2026-03-11 09:00",
+			ID:         12345,
+			BillID:     67890,
+			ExternalID: "ORD-123",
+			Title:      r.FormValue("title"),
+			Status:     "PENDING",
+			PaymentURL: "https://flip.id/p/mock-link", // This field in JSON should be link_url
+			CreatedAt:  "2026-03-11 09:00",
 		}
 		w.WriteHeader(http.StatusOK)
 		// Custom JSON encoding to send link_url (v2) instead of payment_url (v3)
@@ -77,7 +78,7 @@ func TestCreateFlipBill_Detailed(t *testing.T) {
 	phone := "08123456789"
 	redirectURL := "https://myapp.com/success"
 
-	resp, err := CreateFlipBill(orderID, amount, name, email, phone, redirectURL)
+	resp, err := CreateFlipBill(orderID, amount, name, email, phone, redirectURL, nil)
 
 	// Final assertions
 	assert.NoError(t, err)
@@ -100,7 +101,7 @@ func TestCreateFlipBill_ErrorHandling(t *testing.T) {
 	defer os.Unsetenv("FLIP_API_KEY")
 	defer os.Unsetenv("FLIP_BASE_URL")
 
-	resp, err := CreateFlipBill("ORD-ERR", 1000, "User", "user@test.com", "081", "")
+	resp, err := CreateFlipBill("ORD-ERR", 1000, "User", "user@test.com", "081", "", nil)
 
 	assert.Error(t, err)
 	assert.Nil(t, resp)
@@ -120,7 +121,7 @@ func TestCreateFlipBill_Unauthorized(t *testing.T) {
 	defer os.Unsetenv("FLIP_API_KEY")
 	defer os.Unsetenv("FLIP_BASE_URL")
 
-	resp, err := CreateFlipBill("ORD-AUTH", 1000, "User", "user@test.com", "081", "")
+	resp, err := CreateFlipBill("ORD-AUTH", 1000, "User", "user@test.com", "081", "", nil)
 
 	assert.Error(t, err)
 	assert.Nil(t, resp)
@@ -139,9 +140,42 @@ func TestCreateFlipBill_ServerError(t *testing.T) {
 	defer os.Unsetenv("FLIP_API_KEY")
 	defer os.Unsetenv("FLIP_BASE_URL")
 
-	resp, err := CreateFlipBill("ORD-500", 1000, "User", "user@test.com", "081", "")
+	resp, err := CreateFlipBill("ORD-500", 1000, "User", "user@test.com", "081", "", nil)
 
 	assert.Error(t, err)
 	assert.Nil(t, resp)
 	assert.Contains(t, err.Error(), "status 500")
+}
+
+// TestCreateFlipBill_WithExpiry memastikan expired_date dikirim dalam format WIB yang benar
+func TestCreateFlipBill_WithExpiry(t *testing.T) {
+	var receivedExpiredDate string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		receivedExpiredDate = r.FormValue("expired_date")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"link_id":  99,
+			"link_url": "https://flip.id/p/test",
+		})
+	}))
+	defer server.Close()
+
+	os.Setenv("FLIP_API_KEY", "test_api_key")
+	os.Setenv("FLIP_BASE_URL", server.URL)
+	defer os.Unsetenv("FLIP_API_KEY")
+	defer os.Unsetenv("FLIP_BASE_URL")
+
+	// Buat expiry dalam UTC, pastikan konversi ke WIB yang dikirim
+	// UTC 17:00 = WIB 00:00 (hari +1)
+	expiry := time.Date(2026, 3, 13, 17, 0, 0, 0, time.UTC)
+	wib, _ := time.LoadLocation("Asia/Jakarta")
+	expectedWIB := expiry.In(wib).Format("2006-01-02 15:04") // "2026-03-14 00:00"
+
+	_, err := CreateFlipBill("ORD-EXPIRY", 50000, "Test", "test@test.com", "081", "", &expiry)
+
+	assert.NoError(t, err)
+	assert.Equal(t, expectedWIB, receivedExpiredDate,
+		"expired_date harus dikirim dalam WIB, bukan UTC")
 }

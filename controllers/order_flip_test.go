@@ -33,15 +33,16 @@ func TestFlipCallback_Scenarios(t *testing.T) {
 	setupTestDB()
 	gin.SetMode(gin.TestMode)
 
-	// Set environment variables for testing
 	os.Setenv("FLIP_WEBHOOK_TOKEN", "test-token-123")
+	defer os.Unsetenv("FLIP_WEBHOOK_TOKEN")
 
-	// 1. Create a dummy order
+	// Buat dummy order dengan payment_data = bill_link_id (sesuai cara lookup di PaymentCallback)
 	order := models.Order{
 		OrderNumber:   "ORD-FLIP-TEST",
 		TotalAmount:   50000,
 		Status:        "pending",
 		PaymentMethod: "FLIP",
+		PaymentData:   "99001", // Ini adalah bill_link_id yang akan dikirim Flip
 		CreatedAt:     time.Now(),
 	}
 	config.DB.Create(&order)
@@ -49,22 +50,22 @@ func TestFlipCallback_Scenarios(t *testing.T) {
 	r := gin.Default()
 	r.POST("/callback", PaymentCallback)
 
+	// Helper: buat request form-encoded seperti Flip sungguhan
+	makeFlipCallbackRequest := func(billLinkID int64, status, token string) *http.Request {
+		billData, _ := json.Marshal(map[string]interface{}{
+			"bill_link_id": billLinkID,
+			"amount":       "50000",
+			"status":       status,
+		})
+		// Flip mengirim sebagai application/x-www-form-urlencoded
+		body := "data=" + string(billData) + "&token=" + token
+		req, _ := http.NewRequest("POST", "/callback", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		return req
+	}
+
 	t.Run("Scenario 1: SUCCESSFUL Payment", func(t *testing.T) {
-		billData := map[string]interface{}{
-			"external_id": "ORD-FLIP-TEST",
-			"status":      "SUCCESSFUL",
-		}
-		billJSON, _ := json.Marshal(billData)
-		payload := map[string]interface{}{
-			"data":  string(billJSON),
-			"token": "test-token-123",
-		}
-		body, _ := json.Marshal(payload)
-
-		req, _ := http.NewRequest("POST", "/callback", bytes.NewBuffer(body))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Callback-Token", "test-token-123")
-
+		req := makeFlipCallbackRequest(99001, "SUCCESSFUL", "test-token-123")
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
@@ -74,31 +75,13 @@ func TestFlipCallback_Scenarios(t *testing.T) {
 		config.DB.Where("order_number = ?", "ORD-FLIP-TEST").First(&updatedOrder)
 		assert.Equal(t, "paid", updatedOrder.Status)
 		assert.NotNil(t, updatedOrder.PaidAt)
-
-		// Check History
-		var history models.OrderStatusHistory
-		config.DB.Where("order_id = ? AND status = ?", updatedOrder.ID, "success").First(&history)
-		assert.NotNil(t, history.ID)
 	})
 
 	t.Run("Scenario 2: CANCELLED Payment", func(t *testing.T) {
-		// Reset status to pending for next test
+		// Reset status ke pending untuk test berikutnya
 		config.DB.Model(&order).Update("status", "pending")
 
-		billData := map[string]interface{}{
-			"external_id": "ORD-FLIP-TEST",
-			"status":      "CANCELLED",
-		}
-		billJSON, _ := json.Marshal(billData)
-		payload := map[string]interface{}{
-			"data":  string(billJSON),
-			"token": "test-token-123",
-		}
-		body, _ := json.Marshal(payload)
-
-		req, _ := http.NewRequest("POST", "/callback", bytes.NewBuffer(body))
-		req.Header.Set("Content-Type", "application/json")
-
+		req := makeFlipCallbackRequest(99001, "CANCELLED", "test-token-123")
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 

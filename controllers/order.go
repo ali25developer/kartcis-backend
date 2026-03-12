@@ -778,10 +778,10 @@ func PaymentCallback(c *gin.Context) {
 
 	// Lookup order by payment_data yang menyimpan bill_link_id
 	var order models.Order
-	
+
 	// Format terbaru ("146927")
 	exactMatch := fmt.Sprintf("%d", bill.BillLinkID)
-	
+
 	if err := config.DB.Where("payment_data = ?", exactMatch).
 		First(&order).Error; err != nil {
 		// Return 200 agar Flip tidak retry terus
@@ -826,14 +826,14 @@ func processOrderPayment(orderNumber string, status string, c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to update order status"})
 			return
 		}
-		
+
 		// Approve commission status
 		if err := tx.Model(&models.ReferralCommission{}).Where("order_id = ?", order.ID).Update("status", "paid").Error; err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to approve referral commission"})
 			return
 		}
-	} else if status == "failed" || status == "CANCELLED" || status == "expired" || status == "cancelled" {
+	} else if status == "cancelled" || status == "failed" || status == "CANCELLED" || status == "expired" {
 		if err := tx.Model(&order).Updates(models.Order{
 			Status: "cancelled",
 		}).Error; err != nil {
@@ -846,7 +846,7 @@ func processOrderPayment(orderNumber string, status string, c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to restore quota"})
 			return
 		}
-		
+
 		// Restore used counts for vouchers/referrals and cancel commission
 		if err := restoreVoucherAndReferral(tx, order); err != nil {
 			tx.Rollback()
