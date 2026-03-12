@@ -826,6 +826,13 @@ func processOrderPayment(orderNumber string, status string, c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to update order status"})
 			return
 		}
+		
+		// Approve commission status
+		if err := tx.Model(&models.ReferralCommission{}).Where("order_id = ?", order.ID).Update("status", "paid").Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to approve referral commission"})
+			return
+		}
 	} else if status == "failed" || status == "CANCELLED" || status == "expired" || status == "cancelled" {
 		if err := tx.Model(&order).Updates(models.Order{
 			Status: "cancelled",
@@ -837,6 +844,13 @@ func processOrderPayment(orderNumber string, status string, c *gin.Context) {
 		if err := utils.RestoreQuota(tx, order.ID); err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to restore quota"})
+			return
+		}
+		
+		// Restore used counts for vouchers/referrals and cancel commission
+		if err := restoreVoucherAndReferral(tx, order); err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to restore vouchers and referrals"})
 			return
 		}
 	}
@@ -902,6 +916,13 @@ func UserCancelOrder(c *gin.Context) {
 		return
 	}
 
+	// Restore Vouchers and Referrals
+	if err := restoreVoucherAndReferral(tx, order); err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to restore vouchers and referrals"})
+		return
+	}
+
 	// Record history
 	tx.Create(&models.OrderStatusHistory{
 		OrderID:   order.ID,
@@ -916,6 +937,27 @@ func UserCancelOrder(c *gin.Context) {
 	utils.SendOrderCancelledEmail(order, "Dibatalkan oleh pengguna")
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Order cancelled successfully", "data": order})
+}
+
+// Helper to restore limits
+func restoreVoucherAndReferral(tx *gorm.DB, order models.Order) error {
+	if order.VoucherCode != "" {
+		if err := tx.Model(&models.Voucher{}).Where("code = ?", order.VoucherCode).
+			Update("used_count", gorm.Expr("used_count - ?", 1)).Error; err != nil {
+			return err
+		}
+	}
+	if order.ReferralCode != "" {
+		if err := tx.Model(&models.ReferralCode{}).Where("code = ?", order.ReferralCode).
+			Update("used_count", gorm.Expr("used_count - ?", 1)).Error; err != nil {
+			return err
+		}
+	}
+	if err := tx.Model(&models.ReferralCommission{}).Where("order_id = ?", order.ID).
+		Update("status", "cancelled").Error; err != nil {
+		return err
+	}
+	return nil
 }
 
 // processPaymentGateway abstracts the payment generation logic.
