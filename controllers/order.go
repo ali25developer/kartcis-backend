@@ -766,7 +766,6 @@ func PaymentCallback(c *gin.Context) {
 
 	var bill struct {
 		BillLinkID int64  `json:"bill_link_id"` // int64! Format berubah jadi 19 digit per April 10, 2026
-		Amount     int    `json:"amount"` // Flip sends amount as a number
 		Status     string `json:"status"`
 	}
 	if err := json.Unmarshal([]byte(dataStr), &bill); err != nil {
@@ -779,8 +778,11 @@ func PaymentCallback(c *gin.Context) {
 
 	// Lookup order by payment_data yang menyimpan bill_link_id
 	var order models.Order
-	searchString := fmt.Sprintf("Flip Link ID: %d,%%", bill.BillLinkID)
-	if err := config.DB.Where("payment_data LIKE ?", searchString).
+	
+	// Format terbaru ("146927")
+	exactMatch := fmt.Sprintf("%d", bill.BillLinkID)
+	
+	if err := config.DB.Where("payment_data = ?", exactMatch).
 		First(&order).Error; err != nil {
 		// Return 200 agar Flip tidak retry terus
 		log.Printf("[Flip-Callback] Order not found for bill_link_id: %d", bill.BillLinkID)
@@ -824,7 +826,7 @@ func processOrderPayment(orderNumber string, status string, c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to update order status"})
 			return
 		}
-	} else if status == "failed" || status == "CANCELLED" || status == "expired" {
+	} else if status == "failed" || status == "CANCELLED" || status == "expired" || status == "cancelled" {
 		if err := tx.Model(&order).Updates(models.Order{
 			Status: "cancelled",
 		}).Error; err != nil {
