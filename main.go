@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	_ "time/tzdata" // Embed IANA timezone database ke binary (tidak perlu tzdata di OS)
 
 	"kartcis-backend/config"
 	"kartcis-backend/jobs"

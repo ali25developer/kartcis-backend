@@ -63,7 +63,11 @@ func CreateFlipBill(orderID string, amount int, name, email, phone, redirectURL 
 
 	if expiredAt != nil {
 		// Flip v2 Date format: YYYY-MM-DD HH:mm (no timezone)
-		data.Set("expired_date", expiredAt.Format("2006-01-02 15:04"))
+		// Flip menginterpretasikan waktu ini sebagai WIB (Asia/Jakarta),
+		// jadi konversi dulu ke WIB agar server UTC tidak salah kirim.
+		wib, _ := time.LoadLocation("Asia/Jakarta")
+		expiredWIB := expiredAt.In(wib)
+		data.Set("expired_date", expiredWIB.Format("2006-01-02 15:04"))
 	}
 
 	req, err := http.NewRequest("POST", baseURL+"/pwf/bill", strings.NewReader(data.Encode()))
