@@ -149,12 +149,11 @@ func SetupRouter() *gin.Engine {
 		// Referral Codes (Scoped: Admin can manage all, Organizer can manage their own)
 		admin.GET("/referrals", controllers.AdminGetReferralCodes)
 		admin.POST("/referrals", controllers.CreateReferralCode)
-		admin.GET("/referrals/commissions", controllers.AdminGetCommissions)
 		admin.GET("/referrals/:id", controllers.GetReferralCodeDetail)
+		admin.GET("/referrals/:id/stats", controllers.GetReferralStats)
 		admin.PUT("/referrals/:id", controllers.UpdateReferralCode)
 		admin.DELETE("/referrals/:id", controllers.DeleteReferralCode)
 		admin.PATCH("/referrals/:id/status", controllers.UpdateReferralCodeStatus)
-		admin.PATCH("/referrals/commissions/:id/status", controllers.UpdateCommissionStatus)
 
 		// Dashboard (Scoped)
 		admin.GET("/stats", controllers.AdminGetStats)
