@@ -1,181 +1,184 @@
 package utils
 
-import (
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"os"
-	"testing"
-	"time"
+// NOTE: Tests for Flip integration are temporarily disabled.
+// Uncomment when Flip Production API is ready and utils/flip.go is re-enabled.
 
-	"github.com/stretchr/testify/assert"
-)
-
-func TestCreateFlipBill_Detailed(t *testing.T) {
-	// Mock Flip API Server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify URL Path
-		assert.Equal(t, "/pwf/bill", r.URL.Path)
-		assert.Equal(t, "POST", r.Method)
-
-		// Verify Basic Auth
-		username, password, ok := r.BasicAuth()
-		assert.True(t, ok)
-		assert.Equal(t, "test_api_key", username)
-		assert.Equal(t, "", password)
-
-		// Verify Content-Type
-		assert.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
-
-		// Decode and verify payload
-		err := r.ParseForm()
-		assert.NoError(t, err)
-
-		// V2 specific checks
-		assert.Equal(t, "SINGLE", r.FormValue("type"))
-		assert.Equal(t, "0", r.FormValue("is_address_required"))
-		assert.Equal(t, "0", r.FormValue("is_phone_number_required"))
-		assert.Contains(t, r.FormValue("title"), "ORD-123")
-		assert.Equal(t, "2", r.FormValue("step"))
-
-		// Return Mock Response
-		resp := FlipBillResponse{
-			ID:         12345,
-			BillID:     67890,
-			ExternalID: "ORD-123",
-			Title:      r.FormValue("title"),
-			Status:     "PENDING",
-			PaymentURL: "https://flip.id/p/mock-link", // This field in JSON should be link_url
-			CreatedAt:  "2026-03-11 09:00",
-		}
-		w.WriteHeader(http.StatusOK)
-		// Custom JSON encoding to send link_url (v2) instead of payment_url (v3)
-		jsonResp := map[string]interface{}{
-			"link_id":     resp.ID,
-			"bill_id":     resp.BillID,
-			"external_id": resp.ExternalID,
-			"title":       resp.Title,
-			"status":      resp.Status,
-			"link_url":    resp.PaymentURL,
-			"created_at":  resp.CreatedAt,
-		}
-		json.NewEncoder(w).Encode(jsonResp)
-	}))
-	defer server.Close()
-
-	// Setup Environment
-	os.Setenv("FLIP_API_KEY", "test_api_key")
-	os.Setenv("FLIP_BASE_URL", server.URL) // Redirect to mock server
-	defer os.Unsetenv("FLIP_API_KEY")
-	defer os.Unsetenv("FLIP_BASE_URL")
-
-	// Call the function
-	orderID := "ORD-123"
-	amount := 50000
-	name := "John Doe"
-	email := "john@example.com"
-	phone := "08123456789"
-	redirectURL := "https://myapp.com/success"
-
-	resp, err := CreateFlipBill(orderID, amount, name, email, phone, redirectURL, nil)
-
-	// Final assertions
-	assert.NoError(t, err)
-	assert.NotNil(t, resp)
-	assert.Equal(t, "https://flip.id/p/mock-link", resp.PaymentURL)
-	assert.Equal(t, 12345, resp.ID)
-	assert.Equal(t, 67890, resp.BillID)
-}
-
-func TestCreateFlipBill_ErrorHandling(t *testing.T) {
-	// Mock Server returning 422 Validation Error
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		fmt.Fprint(w, `{"code":"VALIDATION_ERROR","errors":[{"attribute":"step","code":1079,"message":"Param step is invalid"}]}`)
-	}))
-	defer server.Close()
-
-	os.Setenv("FLIP_API_KEY", "test_api_key")
-	os.Setenv("FLIP_BASE_URL", server.URL)
-	defer os.Unsetenv("FLIP_API_KEY")
-	defer os.Unsetenv("FLIP_BASE_URL")
-
-	resp, err := CreateFlipBill("ORD-ERR", 1000, "User", "user@test.com", "081", "", nil)
-
-	assert.Error(t, err)
-	assert.Nil(t, resp)
-	assert.Contains(t, err.Error(), "VALIDATION_ERROR")
-	assert.Contains(t, err.Error(), "Param step is invalid")
-}
-
-func TestCreateFlipBill_Unauthorized(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, `{"code":"UNAUTHORIZED","message":"Invalid API Key"}`)
-	}))
-	defer server.Close()
-
-	os.Setenv("FLIP_API_KEY", "wrong_key")
-	os.Setenv("FLIP_BASE_URL", server.URL)
-	defer os.Unsetenv("FLIP_API_KEY")
-	defer os.Unsetenv("FLIP_BASE_URL")
-
-	resp, err := CreateFlipBill("ORD-AUTH", 1000, "User", "user@test.com", "081", "", nil)
-
-	assert.Error(t, err)
-	assert.Nil(t, resp)
-	assert.Contains(t, err.Error(), "UNAUTHORIZED")
-}
-
-func TestCreateFlipBill_ServerError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprint(w, `Flip Server Exploded`)
-	}))
-	defer server.Close()
-
-	os.Setenv("FLIP_API_KEY", "test_key")
-	os.Setenv("FLIP_BASE_URL", server.URL)
-	defer os.Unsetenv("FLIP_API_KEY")
-	defer os.Unsetenv("FLIP_BASE_URL")
-
-	resp, err := CreateFlipBill("ORD-500", 1000, "User", "user@test.com", "081", "", nil)
-
-	assert.Error(t, err)
-	assert.Nil(t, resp)
-	assert.Contains(t, err.Error(), "status 500")
-}
-
-// TestCreateFlipBill_WithExpiry memastikan expired_date dikirim dalam format WIB yang benar
-func TestCreateFlipBill_WithExpiry(t *testing.T) {
-	var receivedExpiredDate string
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.ParseForm()
-		receivedExpiredDate = r.FormValue("expired_date")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"link_id":  99,
-			"link_url": "https://flip.id/p/test",
-		})
-	}))
-	defer server.Close()
-
-	os.Setenv("FLIP_API_KEY", "test_api_key")
-	os.Setenv("FLIP_BASE_URL", server.URL)
-	defer os.Unsetenv("FLIP_API_KEY")
-	defer os.Unsetenv("FLIP_BASE_URL")
-
-	// Buat expiry dalam UTC, pastikan konversi ke WIB yang dikirim
-	// UTC 17:00 = WIB 00:00 (hari +1)
-	expiry := time.Date(2026, 3, 13, 17, 0, 0, 0, time.UTC)
-	wib, _ := time.LoadLocation("Asia/Jakarta")
-	expectedWIB := expiry.In(wib).Format("2006-01-02 15:04") // "2026-03-14 00:00"
-
-	_, err := CreateFlipBill("ORD-EXPIRY", 50000, "Test", "test@test.com", "081", "", &expiry)
-
-	assert.NoError(t, err)
-	assert.Equal(t, expectedWIB, receivedExpiredDate,
-		"expired_date harus dikirim dalam WIB, bukan UTC")
-}
+// import (
+// 	"encoding/json"
+// 	"fmt"
+// 	"net/http"
+// 	"net/http/httptest"
+// 	"os"
+// 	"testing"
+// 	"time"
+//
+// 	"github.com/stretchr/testify/assert"
+// )
+//
+// func TestCreateFlipBill_Detailed(t *testing.T) {
+// 	// Mock Flip API Server
+// 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// 		// Verify URL Path
+// 		assert.Equal(t, "/pwf/bill", r.URL.Path)
+// 		assert.Equal(t, "POST", r.Method)
+//
+// 		// Verify Basic Auth
+// 		username, password, ok := r.BasicAuth()
+// 		assert.True(t, ok)
+// 		assert.Equal(t, "test_api_key", username)
+// 		assert.Equal(t, "", password)
+//
+// 		// Verify Content-Type
+// 		assert.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
+//
+// 		// Decode and verify payload
+// 		err := r.ParseForm()
+// 		assert.NoError(t, err)
+//
+// 		// V2 specific checks
+// 		assert.Equal(t, "SINGLE", r.FormValue("type"))
+// 		assert.Equal(t, "0", r.FormValue("is_address_required"))
+// 		assert.Equal(t, "0", r.FormValue("is_phone_number_required"))
+// 		assert.Contains(t, r.FormValue("title"), "ORD-123")
+// 		assert.Equal(t, "2", r.FormValue("step"))
+//
+// 		// Return Mock Response
+// 		resp := FlipBillResponse{
+// 			ID:         12345,
+// 			BillID:     67890,
+// 			ExternalID: "ORD-123",
+// 			Title:      r.FormValue("title"),
+// 			Status:     "PENDING",
+// 			PaymentURL: "https://flip.id/p/mock-link", // This field in JSON should be link_url
+// 			CreatedAt:  "2026-03-11 09:00",
+// 		}
+// 		w.WriteHeader(http.StatusOK)
+// 		// Custom JSON encoding to send link_url (v2) instead of payment_url (v3)
+// 		jsonResp := map[string]interface{}{
+// 			"link_id":     resp.ID,
+// 			"bill_id":     resp.BillID,
+// 			"external_id": resp.ExternalID,
+// 			"title":       resp.Title,
+// 			"status":      resp.Status,
+// 			"link_url":    resp.PaymentURL,
+// 			"created_at":  resp.CreatedAt,
+// 		}
+// 		json.NewEncoder(w).Encode(jsonResp)
+// 	}))
+// 	defer server.Close()
+//
+// 	// Setup Environment
+// 	os.Setenv("FLIP_API_KEY", "test_api_key")
+// 	os.Setenv("FLIP_BASE_URL", server.URL) // Redirect to mock server
+// 	defer os.Unsetenv("FLIP_API_KEY")
+// 	defer os.Unsetenv("FLIP_BASE_URL")
+//
+// 	// Call the function
+// 	orderID := "ORD-123"
+// 	amount := 50000
+// 	name := "John Doe"
+// 	email := "john@example.com"
+// 	phone := "08123456789"
+// 	redirectURL := "https://myapp.com/success"
+//
+// 	resp, err := CreateFlipBill(orderID, amount, name, email, phone, redirectURL, nil)
+//
+// 	// Final assertions
+// 	assert.NoError(t, err)
+// 	assert.NotNil(t, resp)
+// 	assert.Equal(t, "https://flip.id/p/mock-link", resp.PaymentURL)
+// 	assert.Equal(t, 12345, resp.ID)
+// 	assert.Equal(t, 67890, resp.BillID)
+// }
+//
+// func TestCreateFlipBill_ErrorHandling(t *testing.T) {
+// 	// Mock Server returning 422 Validation Error
+// 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// 		w.WriteHeader(http.StatusUnprocessableEntity)
+// 		fmt.Fprint(w, `{"code":"VALIDATION_ERROR","errors":[{"attribute":"step","code":1079,"message":"Param step is invalid"}]}`)
+// 	}))
+// 	defer server.Close()
+//
+// 	os.Setenv("FLIP_API_KEY", "test_api_key")
+// 	os.Setenv("FLIP_BASE_URL", server.URL)
+// 	defer os.Unsetenv("FLIP_API_KEY")
+// 	defer os.Unsetenv("FLIP_BASE_URL")
+//
+// 	resp, err := CreateFlipBill("ORD-ERR", 1000, "User", "user@test.com", "081", "", nil)
+//
+// 	assert.Error(t, err)
+// 	assert.Nil(t, resp)
+// 	assert.Contains(t, err.Error(), "VALIDATION_ERROR")
+// 	assert.Contains(t, err.Error(), "Param step is invalid")
+// }
+//
+// func TestCreateFlipBill_Unauthorized(t *testing.T) {
+// 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// 		w.WriteHeader(http.StatusUnauthorized)
+// 		fmt.Fprint(w, `{"code":"UNAUTHORIZED","message":"Invalid API Key"}`)
+// 	}))
+// 	defer server.Close()
+//
+// 	os.Setenv("FLIP_API_KEY", "wrong_key")
+// 	os.Setenv("FLIP_BASE_URL", server.URL)
+// 	defer os.Unsetenv("FLIP_API_KEY")
+// 	defer os.Unsetenv("FLIP_BASE_URL")
+//
+// 	resp, err := CreateFlipBill("ORD-AUTH", 1000, "User", "user@test.com", "081", "", nil)
+//
+// 	assert.Error(t, err)
+// 	assert.Nil(t, resp)
+// 	assert.Contains(t, err.Error(), "UNAUTHORIZED")
+// }
+//
+// func TestCreateFlipBill_ServerError(t *testing.T) {
+// 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// 		w.WriteHeader(http.StatusInternalServerError)
+// 		fmt.Fprint(w, `Flip Server Exploded`)
+// 	}))
+// 	defer server.Close()
+//
+// 	os.Setenv("FLIP_API_KEY", "test_key")
+// 	os.Setenv("FLIP_BASE_URL", server.URL)
+// 	defer os.Unsetenv("FLIP_API_KEY")
+// 	defer os.Unsetenv("FLIP_BASE_URL")
+//
+// 	resp, err := CreateFlipBill("ORD-500", 1000, "User", "user@test.com", "081", "", nil)
+//
+// 	assert.Error(t, err)
+// 	assert.Nil(t, resp)
+// 	assert.Contains(t, err.Error(), "status 500")
+// }
+//
+// // TestCreateFlipBill_WithExpiry memastikan expired_date dikirim dalam format WIB yang benar
+// func TestCreateFlipBill_WithExpiry(t *testing.T) {
+// 	var receivedExpiredDate string
+//
+// 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// 		r.ParseForm()
+// 		receivedExpiredDate = r.FormValue("expired_date")
+// 		w.WriteHeader(http.StatusOK)
+// 		json.NewEncoder(w).Encode(map[string]interface{}{
+// 			"link_id":  99,
+// 			"link_url": "https://flip.id/p/test",
+// 		})
+// 	}))
+// 	defer server.Close()
+//
+// 	os.Setenv("FLIP_API_KEY", "test_api_key")
+// 	os.Setenv("FLIP_BASE_URL", server.URL)
+// 	defer os.Unsetenv("FLIP_API_KEY")
+// 	defer os.Unsetenv("FLIP_BASE_URL")
+//
+// 	// Buat expiry dalam UTC, pastikan konversi ke WIB yang dikirim
+// 	// UTC 17:00 = WIB 00:00 (hari +1)
+// 	expiry := time.Date(2026, 3, 13, 17, 0, 0, 0, time.UTC)
+// 	wib, _ := time.LoadLocation("Asia/Jakarta")
+// 	expectedWIB := expiry.In(wib).Format("2006-01-02 15:04") // "2026-03-14 00:00"
+//
+// 	_, err := CreateFlipBill("ORD-EXPIRY", 50000, "Test", "test@test.com", "081", "", &expiry)
+//
+// 	assert.NoError(t, err)
+// 	assert.Equal(t, expectedWIB, receivedExpiredDate,
+// 		"expired_date harus dikirim dalam WIB, bukan UTC")
+// }
