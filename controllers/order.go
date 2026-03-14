@@ -3,7 +3,6 @@ package controllers
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -459,7 +458,7 @@ func CreateOrder(c *gin.Context) {
 			}
 
 			if rValid {
-				// Discount for buyer
+				// Discount opsional — hanya jika discount_type bukan "none"
 				if referral.DiscountType == "percent" && referral.DiscountValue > 0 {
 					referralDiscount = totalAmount * (referral.DiscountValue / 100)
 				} else if referral.DiscountType == "fixed" && referral.DiscountValue > 0 {
@@ -469,14 +468,47 @@ func CreateOrder(c *gin.Context) {
 					}
 				}
 				appliedReferralCode = referral.Code
-				// Increment used_count
+				// Increment used_count untuk tracking
 				tx.Model(&referral).Update("used_count", gorm.Expr("used_count + ?", 1))
 			}
 		}
 	}
 
-	// Unique code generation removed (System now uses Flip)
+	// Handle Unique Code for Manual Bank Transfer
 	var uniqueCode int
+	if strings.HasPrefix(req.PaymentMethod, "BANK_TRANSFER_") || req.PaymentMethod == "MANUAL_JAGO" {
+		// Generate unique code and ensure TOTAL AMOUNT is unique for pending orders
+		baseAmount := totalAmount + totalAdminFee - discountAmount - referralDiscount
+
+		// 1. Get ALL codes used in the last 3 hours
+		var usedCodes []int
+		threeHoursAgo := time.Now().Add(-3 * time.Hour)
+		tx.Model(&models.Order{}).
+			Where("created_at >= ? AND total_amount >= ? AND total_amount <= ?", threeHoursAgo, baseAmount+101, baseAmount+999).
+			Pluck("unique_code", &usedCodes)
+
+		// 2. Check Capacity
+		if len(usedCodes) >= 899 {
+			tx.Rollback()
+			c.JSON(http.StatusTooManyRequests, gin.H{
+				"success": false,
+				"message": "Maaf, sistem pembayaran untuk nominal ini sedang sangat penuh. Mohon coba 15-30 menit lagi.",
+			})
+			return
+		}
+
+		// 3. Find First Available Slot (Linear Search)
+		usedMap := make(map[int]bool)
+		for _, code := range usedCodes {
+			usedMap[code] = true
+		}
+		for code := 101; code <= 999; code++ {
+			if !usedMap[code] {
+				uniqueCode = code
+				break
+			}
+		}
+	}
 
 	// Create Order
 	order := models.Order{
@@ -496,13 +528,8 @@ func CreateOrder(c *gin.Context) {
 		CreatedAt:      time.Now(),
 	}
 
-	// Process Payment (Simulate Gateway)
-	// This function prepares the order for payment (generating VA, URLs, etc)
-	if err := processPaymentGateway(&order, req.PaymentMethod, userID); err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": err.Error()})
-		return
-	}
+	// Process Payment (Generate VA, URLs, payment instructions)
+	processPaymentGateway(&order, req.PaymentMethod, userID)
 
 	if err := tx.Create(&order).Error; err != nil {
 		tx.Rollback()
@@ -517,30 +544,6 @@ func CreateOrder(c *gin.Context) {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to generate tickets"})
 			return
-		}
-	}
-
-	// Record Referral Commission AFTER order ID is available
-	if appliedReferralCode != "" {
-		var referral models.ReferralCode
-		if err := tx.Where("code = ?", appliedReferralCode).First(&referral).Error; err == nil {
-			var commissionAmount float64
-			base := totalAmount // Based on ticket subtotal before fees/discounts
-			if referral.RewardType == "percent" && referral.RewardValue > 0 {
-				commissionAmount = base * (referral.RewardValue / 100)
-			} else if referral.RewardType == "fixed" && referral.RewardValue > 0 {
-				commissionAmount = referral.RewardValue
-			}
-			if commissionAmount > 0 {
-				commission := models.ReferralCommission{
-					ReferralCodeID:   referral.ID,
-					MarketerID:       referral.UserID,
-					OrderID:          order.ID,
-					CommissionAmount: commissionAmount,
-					Status:           "pending",
-				}
-				tx.Create(&commission)
-			}
 		}
 	}
 
@@ -743,68 +746,74 @@ func PayOrder(c *gin.Context) {
 }
 
 // Payment Callback (Webhook dari Flip)
+// NOTE: Flip integration temporarily disabled - uncomment when Flip Production API is ready.
+// Also uncomment the route in routes/routes.go: POST /orders/payment-callback
 func PaymentCallback(c *gin.Context) {
-	callbackToken := os.Getenv("FLIP_WEBHOOK_TOKEN")
-
-	// Flip mengirim callback sebagai form-encoded:
-	// data  = JSON string berisi detail bill
-	// token = validation token (form field TERPISAH, bukan di dalam JSON)
-	dataStr := c.PostForm("data")
-	tokenStr := c.PostForm("token") // ← token di sini, bukan di dalam JSON data
-
-	if dataStr == "" {
-		c.Status(http.StatusBadRequest)
-		return
-	}
-
-	// Validasi token (dari form field "token")
-	if callbackToken != "" && tokenStr != callbackToken {
-		log.Printf("[Flip-Callback] Invalid token received: %s", tokenStr)
-		c.Status(http.StatusUnauthorized)
-		return
-	}
-
-	var bill struct {
-		BillLinkID int64  `json:"bill_link_id"` // int64! Format berubah jadi 19 digit per April 10, 2026
-		Status     string `json:"status"`
-	}
-	if err := json.Unmarshal([]byte(dataStr), &bill); err != nil {
-		log.Printf("[Flip-Callback] Failed to parse data: %v", err)
-		c.Status(http.StatusBadRequest)
-		return
-	}
-
-	log.Printf("[Flip-Callback] Received: bill_link_id=%d, status=%s", bill.BillLinkID, bill.Status)
-
-	// Lookup order by payment_data yang menyimpan bill_link_id
-	var order models.Order
-
-	// Format terbaru ("146927")
-	exactMatch := fmt.Sprintf("%d", bill.BillLinkID)
-
-	if err := config.DB.Where("payment_data = ?", exactMatch).
-		First(&order).Error; err != nil {
-		// Return 200 agar Flip tidak retry terus
-		log.Printf("[Flip-Callback] Order not found for bill_link_id: %d", bill.BillLinkID)
-		c.Status(http.StatusOK)
-		return
-	}
-
-	status := "pending"
-	switch bill.Status {
-	case "SUCCESSFUL":
-		status = "paid"
-	case "CANCELLED", "FAILED":
-		status = "cancelled"
-	}
-
-	if status == "pending" {
-		c.Status(http.StatusOK)
-		return
-	}
-
-	processOrderPayment(order.OrderNumber, status, c)
+	c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Payment callback not available"})
 }
+
+// func PaymentCallback(c *gin.Context) {
+// 	callbackToken := os.Getenv("FLIP_WEBHOOK_TOKEN")
+//
+// 	// Flip mengirim callback sebagai form-encoded:
+// 	// data  = JSON string berisi detail bill
+// 	// token = validation token (form field TERPISAH, bukan di dalam JSON)
+// 	dataStr := c.PostForm("data")
+// 	tokenStr := c.PostForm("token") // ← token di sini, bukan di dalam JSON data
+//
+// 	if dataStr == "" {
+// 		c.Status(http.StatusBadRequest)
+// 		return
+// 	}
+//
+// 	// Validasi token (dari form field "token")
+// 	if callbackToken != "" && tokenStr != callbackToken {
+// 		log.Printf("[Flip-Callback] Invalid token received: %s", tokenStr)
+// 		c.Status(http.StatusUnauthorized)
+// 		return
+// 	}
+//
+// 	var bill struct {
+// 		BillLinkID int64  `json:"bill_link_id"` // int64! Format berubah jadi 19 digit per April 10, 2026
+// 		Status     string `json:"status"`
+// 	}
+// 	if err := json.Unmarshal([]byte(dataStr), &bill); err != nil {
+// 		log.Printf("[Flip-Callback] Failed to parse data: %v", err)
+// 		c.Status(http.StatusBadRequest)
+// 		return
+// 	}
+//
+// 	log.Printf("[Flip-Callback] Received: bill_link_id=%d, status=%s", bill.BillLinkID, bill.Status)
+//
+// 	// Lookup order by payment_data yang menyimpan bill_link_id
+// 	var order models.Order
+//
+// 	// Format terbaru ("146927")
+// 	exactMatch := fmt.Sprintf("%d", bill.BillLinkID)
+//
+// 	if err := config.DB.Where("payment_data = ?", exactMatch).
+// 		First(&order).Error; err != nil {
+// 		// Return 200 agar Flip tidak retry terus
+// 		log.Printf("[Flip-Callback] Order not found for bill_link_id: %d", bill.BillLinkID)
+// 		c.Status(http.StatusOK)
+// 		return
+// 	}
+//
+// 	status := "pending"
+// 	switch bill.Status {
+// 	case "SUCCESSFUL":
+// 		status = "paid"
+// 	case "CANCELLED", "FAILED":
+// 		status = "cancelled"
+// 	}
+//
+// 	if status == "pending" {
+// 		c.Status(http.StatusOK)
+// 		return
+// 	}
+//
+// 	processOrderPayment(order.OrderNumber, status, c)
+// }
 
 // Extracted internal function to process payment status
 func processOrderPayment(orderNumber string, status string, c *gin.Context) {
@@ -824,13 +833,6 @@ func processOrderPayment(orderNumber string, status string, c *gin.Context) {
 		}).Error; err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to update order status"})
-			return
-		}
-
-		// Approve commission status
-		if err := tx.Model(&models.ReferralCommission{}).Where("order_id = ?", order.ID).Update("status", "paid").Error; err != nil {
-			tx.Rollback()
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Failed to approve referral commission"})
 			return
 		}
 	} else if status == "cancelled" || status == "failed" || status == "CANCELLED" || status == "expired" {
@@ -939,7 +941,7 @@ func UserCancelOrder(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Order cancelled successfully", "data": order})
 }
 
-// Helper to restore limits
+// Helper to restore limits on cancellation
 func restoreVoucherAndReferral(tx *gorm.DB, order models.Order) error {
 	if order.VoucherCode != "" {
 		if err := tx.Model(&models.Voucher{}).Where("code = ?", order.VoucherCode).
@@ -953,41 +955,18 @@ func restoreVoucherAndReferral(tx *gorm.DB, order models.Order) error {
 			return err
 		}
 	}
-	if err := tx.Model(&models.ReferralCommission{}).Where("order_id = ?", order.ID).
-		Update("status", "cancelled").Error; err != nil {
-		return err
-	}
 	return nil
 }
 
 // processPaymentGateway abstracts the payment generation logic.
-// In the future, replace the body of this function with actual API calls to Flip/Midtrans.
-// processPaymentGateway abstracts the payment generation logic.
-func processPaymentGateway(order *models.Order, paymentMethod string, userID *uint) error {
-	if os.Getenv("FLIP_API_KEY") != "" {
-		// Use Flip Bill
-		expiryTime := order.CreatedAt.Add(24 * time.Hour)
-		if order.ExpiresAt != nil {
-			expiryTime = *order.ExpiresAt
-		}
+// To enable Flip later: uncomment utils/flip.go, PaymentCallback handler, and route in routes.go.
+func processPaymentGateway(order *models.Order, paymentMethod string, userID *uint) {
+	// NOTE: Flip block temporarily disabled. Uncomment when Flip Production API is ready.
+	// if os.Getenv("FLIP_API_KEY") != "" { ... }
 
-		redirectURL := fmt.Sprintf("%s/payment/%s", os.Getenv("FRONTEND_URL"), order.OrderNumber)
-		resp, err := utils.CreateFlipBill(order.OrderNumber, int(order.TotalAmount), order.CustomerName, order.CustomerEmail, order.CustomerPhone, redirectURL, &expiryTime)
-		if err != nil {
-			// Jika pakai API Key tapi error, jangan lanjut ke mock, tapi laporkan errornya
-			return fmt.Errorf("Flip API Error: %v", err)
-		}
-
-		order.PaymentURL = resp.PaymentURL
-		order.PaymentData = fmt.Sprintf("%d", resp.ID) // Simpan hanya link_id untuk lookup callback
-		order.PaymentInstructions = "Silakan klik link pembayaran Flip untuk menyelesaikan transaksi."
-		return nil
-	}
-
-	// 1. Virtual Accounts (Mock Fallback)
+	// 1. Virtual Accounts (BCA, Mandiri, BNI, BRI, etc.)
 	if strings.Contains(paymentMethod, "VA") {
-		// ... existing mock VA logic ... (shortened for clarity if it's the same)
-		bankCode := "88888"
+		bankCode := "88888" // Default
 		if strings.Contains(paymentMethod, "BCA") {
 			bankCode = "70012"
 		} else if strings.Contains(paymentMethod, "Mandiri") {
@@ -1002,31 +981,41 @@ func processPaymentGateway(order *models.Order, paymentMethod string, userID *ui
 		if userID != nil {
 			idForVA = int(*userID)
 		} else {
-			idForVA = 99999
+			idForVA = 99999 // Guest
 		}
 
 		userIDPadded := fmt.Sprintf("%05d", idForVA)
 		timestamp := fmt.Sprintf("%06d", time.Now().Unix()%1000000)
 		order.VirtualAccountNumber = fmt.Sprintf("%s%s%s", bankCode, userIDPadded, timestamp)
-		return nil
+		return
 	}
 
-	// 2. QRIS/E-Wallet (Mock Fallback)
+	// 2. E-Wallets / QRIS (OVO, Dana, ShopeePay, LinkAja)
 	if strings.Contains(paymentMethod, "QRIS") || strings.Contains(paymentMethod, "OVO") || strings.Contains(paymentMethod, "Dana") {
 		order.PaymentURL = fmt.Sprintf("https://simulator.kartcis.id/pay/%s", order.OrderNumber)
-		return nil
+		return
 	}
 
-	// 4. Retail Outlet (Mock Fallback)
+	// 3. Retail Outlet (Alfamart/Indomaret)
 	if strings.Contains(paymentMethod, "Alfamart") || strings.Contains(paymentMethod, "Indomaret") {
 		order.VirtualAccountNumber = fmt.Sprintf("ALFA-%d", time.Now().UnixNano()%100000000)
-		return nil
+		return
 	}
 
-	// Default Fallback for FLIP method if API Key missing
-	if order.PaymentURL == "" && (paymentMethod == "FLIP" || paymentMethod == "Flip") {
-		order.PaymentURL = fmt.Sprintf("https://simulator.kartcis.id/pay/%s", order.OrderNumber)
+	// 4. Bank Transfer Manual (Jago) — diverifikasi otomatis via email scraping
+	if strings.HasPrefix(paymentMethod, "BANK_TRANSFER_") || paymentMethod == "MANUAL_JAGO" {
+		accNo := os.Getenv("JAGO_ACCOUNT_NUMBER")
+		accName := os.Getenv("JAGO_ACCOUNT_NAME")
+		if accNo == "" {
+			accNo = "1010101020" // Default Demo
+			accName = "Kartcis Demo Account"
+		}
+		order.VirtualAccountNumber = accNo
+		order.PaymentData = accName
+		order.PaymentInstructions = fmt.Sprintf(
+			"Silakan transfer ke Bank Jago: %s a/n %s. Pastikan nominal sampai 3 digit terakhir (Rp %v) agar dapat diverifikasi otomatis.",
+			accNo, accName, utils.FormatPrice(order.TotalAmount),
+		)
+		return
 	}
-
-	return nil
 }

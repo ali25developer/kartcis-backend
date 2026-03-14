@@ -246,32 +246,19 @@ type BankTransaction struct {
 type ReferralCode struct {
 	ID            uint       `gorm:"primaryKey" json:"id"`
 	Code          string     `gorm:"uniqueIndex" json:"code"`
-	UserID        uint       `json:"user_id"` // Marketer
-	User          User       `json:"user" gorm:"foreignKey:UserID"`
-	EventID       *uint      `json:"event_id"` // Optional: limit to specific event
+	PartnerName   string     `json:"partner_name"` // Nama mitra pemasaran (misal: "Kopi Senja")
+	UserID        *uint      `json:"user_id"`      // Opsional: linked ke user admin/organizer
+	User          *User      `json:"user,omitempty" gorm:"foreignKey:UserID"`
+	EventID       *uint      `json:"event_id"` // Opsional: batasi ke event tertentu
 	Event         *Event     `json:"event,omitempty" gorm:"foreignKey:EventID"`
-	RewardType    string     `json:"reward_type"`   // "percent" or "fixed"
-	RewardValue   float64    `json:"reward_value"`  // Commission amount or percentage
-	DiscountType  string     `json:"discount_type"` // "percent", "fixed", or "none"
-	DiscountValue float64    `json:"discount_value"`
-	MaxUses       int        `json:"max_uses"` // 0 for unlimited
-	UsedCount     int        `json:"used_count"`
+	DiscountType  string     `json:"discount_type" gorm:"default:none"` // "none", "percent", "fixed"
+	DiscountValue float64    `json:"discount_value" gorm:"default:0"`
+	RewardType    string     `json:"reward_type" gorm:"default:none"` // "none", "percent", "fixed" (Komisi untuk mitra)
+	RewardValue   float64    `json:"reward_value" gorm:"default:0"`
+	MaxUses       int        `json:"max_uses"`   // 0 = unlimited
+	UsedCount     int        `json:"used_count"` // Diincrement tiap order
 	ExpiresAt     *time.Time `json:"expires_at"`
 	IsActive      bool       `json:"is_active" gorm:"default:true"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
-}
-
-type ReferralCommission struct {
-	ID               uint         `gorm:"primaryKey" json:"id"`
-	ReferralCodeID   uint         `json:"referral_code_id"`
-	ReferralCode     ReferralCode `json:"referral_code" gorm:"foreignKey:ReferralCodeID"`
-	MarketerID       uint         `json:"marketer_id"`
-	Marketer         User         `json:"marketer" gorm:"foreignKey:MarketerID"`
-	OrderID          uint         `json:"order_id"`
-	Order            Order        `json:"-" gorm:"foreignKey:OrderID"`
-	CommissionAmount float64      `json:"commission_amount"`
-	Status           string       `json:"status"` // pending, paid, cancelled
-	CreatedAt        time.Time    `json:"created_at"`
-	UpdatedAt        time.Time    `json:"updated_at"`
 }

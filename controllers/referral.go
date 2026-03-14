@@ -12,7 +12,6 @@ import (
 	"kartcis-backend/models"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 // ─────────────────────────────────────────────
@@ -35,25 +34,15 @@ func generateReferralCode(prefix string) string {
 
 // GET /admin/referrals
 func AdminGetReferralCodes(c *gin.Context) {
-	role, _ := c.Get("userRole")
-	userID, _ := c.Get("userID")
-
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 	offset := (page - 1) * limit
 
-	query := config.DB.Preload("User").Preload("Event")
-
-	// Organizer hanya melihat referral code milik mereka
-	if role != "admin" {
-		query = query.Where("user_id = ?", userID)
-	}
-
 	var total int64
-	query.Model(&models.ReferralCode{}).Count(&total)
+	config.DB.Model(&models.ReferralCode{}).Count(&total)
 
 	var codes []models.ReferralCode
-	query.Order("created_at DESC").Limit(limit).Offset(offset).Find(&codes)
+	config.DB.Preload("User").Preload("Event").Order("created_at DESC").Limit(limit).Offset(offset).Find(&codes)
 
 	totalPages := int(total) / limit
 	if int(total)%limit != 0 {
@@ -77,15 +66,16 @@ func AdminGetReferralCodes(c *gin.Context) {
 // POST /admin/referrals
 func CreateReferralCode(c *gin.Context) {
 	var input struct {
-		UserID        uint       `json:"user_id" binding:"required"` // Marketer user ID
+		PartnerName   string     `json:"partner_name" binding:"required"`
+		UserID        *uint      `json:"user_id"`
 		EventID       *uint      `json:"event_id"`
-		Prefix        string     `json:"prefix"`        // Optional prefix for code
-		CustomCode    string     `json:"custom_code"`   // Or specify exact code
-		RewardType    string     `json:"reward_type"`   // "percent" or "fixed"
-		RewardValue   float64    `json:"reward_value"`  // Commission value
-		DiscountType  string     `json:"discount_type"` // "percent", "fixed", or "none"
+		CustomCode    string     `json:"custom_code"`
+		Prefix        string     `json:"prefix"`
+		DiscountType  string     `json:"discount_type"` // none, percent, fixed
 		DiscountValue float64    `json:"discount_value"`
-		MaxUses       int        `json:"max_uses"` // 0 = unlimited
+		RewardType    string     `json:"reward_type"` // none, percent, fixed
+		RewardValue   float64    `json:"reward_value"`
+		MaxUses       int        `json:"max_uses"`
 		ExpiresAt     *time.Time `json:"expires_at"`
 	}
 
@@ -94,22 +84,13 @@ func CreateReferralCode(c *gin.Context) {
 		return
 	}
 
-	// Validate reward type
-	if input.RewardType != "percent" && input.RewardType != "fixed" {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "reward_type must be 'percent' or 'fixed'"})
-		return
-	}
-
-	// Validate discount type (optional)
-	if input.DiscountType != "" && input.DiscountType != "percent" && input.DiscountType != "fixed" && input.DiscountType != "none" {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "discount_type must be 'percent', 'fixed', or 'none'"})
-		return
-	}
 	if input.DiscountType == "" {
 		input.DiscountType = "none"
 	}
+	if input.RewardType == "" {
+		input.RewardType = "none"
+	}
 
-	// Determine code
 	code := input.CustomCode
 	if code == "" {
 		code = generateReferralCode(input.Prefix)
@@ -117,21 +98,15 @@ func CreateReferralCode(c *gin.Context) {
 		code = strings.ToUpper(strings.TrimSpace(code))
 	}
 
-	// Verify user exists
-	var marketer models.User
-	if err := config.DB.First(&marketer, input.UserID).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Marketer user not found"})
-		return
-	}
-
 	referral := models.ReferralCode{
 		Code:          code,
+		PartnerName:   input.PartnerName,
 		UserID:        input.UserID,
 		EventID:       input.EventID,
-		RewardType:    input.RewardType,
-		RewardValue:   input.RewardValue,
 		DiscountType:  input.DiscountType,
 		DiscountValue: input.DiscountValue,
+		RewardType:    input.RewardType,
+		RewardValue:   input.RewardValue,
 		MaxUses:       input.MaxUses,
 		ExpiresAt:     input.ExpiresAt,
 		IsActive:      true,
@@ -143,23 +118,15 @@ func CreateReferralCode(c *gin.Context) {
 	}
 
 	config.DB.Preload("User").Preload("Event").First(&referral, referral.ID)
-
 	c.JSON(http.StatusCreated, gin.H{"success": true, "data": referral})
 }
 
 // GET /admin/referrals/:id
 func GetReferralCodeDetail(c *gin.Context) {
 	id := c.Param("id")
-	role, _ := c.Get("userRole")
-	userID, _ := c.Get("userID")
 
 	var code models.ReferralCode
-	query := config.DB.Preload("User").Preload("Event")
-	if role != "admin" {
-		query = query.Where("user_id = ?", userID)
-	}
-
-	if err := query.First(&code, id).Error; err != nil {
+	if err := config.DB.Preload("User").Preload("Event").First(&code, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Referral code not found"})
 		return
 	}
@@ -170,26 +137,20 @@ func GetReferralCodeDetail(c *gin.Context) {
 // PUT /admin/referrals/:id
 func UpdateReferralCode(c *gin.Context) {
 	id := c.Param("id")
-	role, _ := c.Get("userRole")
-	userID, _ := c.Get("userID")
 
 	var code models.ReferralCode
-	query := config.DB
-	if role != "admin" {
-		query = query.Where("user_id = ?", userID)
-	}
-
-	if err := query.First(&code, id).Error; err != nil {
+	if err := config.DB.First(&code, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Referral code not found"})
 		return
 	}
 
 	var input struct {
+		PartnerName   string     `json:"partner_name"`
 		EventID       *uint      `json:"event_id"`
-		RewardType    string     `json:"reward_type"`
-		RewardValue   *float64   `json:"reward_value"`
 		DiscountType  string     `json:"discount_type"`
 		DiscountValue *float64   `json:"discount_value"`
+		RewardType    string     `json:"reward_type"`
+		RewardValue   *float64   `json:"reward_value"`
 		MaxUses       *int       `json:"max_uses"`
 		ExpiresAt     *time.Time `json:"expires_at"`
 		IsActive      *bool      `json:"is_active"`
@@ -201,20 +162,23 @@ func UpdateReferralCode(c *gin.Context) {
 	}
 
 	updates := map[string]interface{}{}
+	if input.PartnerName != "" {
+		updates["partner_name"] = input.PartnerName
+	}
 	if input.EventID != nil {
 		updates["event_id"] = input.EventID
-	}
-	if input.RewardType != "" {
-		updates["reward_type"] = input.RewardType
-	}
-	if input.RewardValue != nil {
-		updates["reward_value"] = *input.RewardValue
 	}
 	if input.DiscountType != "" {
 		updates["discount_type"] = input.DiscountType
 	}
 	if input.DiscountValue != nil {
 		updates["discount_value"] = *input.DiscountValue
+	}
+	if input.RewardType != "" {
+		updates["reward_type"] = input.RewardType
+	}
+	if input.RewardValue != nil {
+		updates["reward_value"] = *input.RewardValue
 	}
 	if input.MaxUses != nil {
 		updates["max_uses"] = *input.MaxUses
@@ -235,16 +199,9 @@ func UpdateReferralCode(c *gin.Context) {
 // DELETE /admin/referrals/:id
 func DeleteReferralCode(c *gin.Context) {
 	id := c.Param("id")
-	role, _ := c.Get("userRole")
-	userID, _ := c.Get("userID")
 
 	var code models.ReferralCode
-	query := config.DB
-	if role != "admin" {
-		query = query.Where("user_id = ?", userID)
-	}
-
-	if err := query.First(&code, id).Error; err != nil {
+	if err := config.DB.First(&code, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Referral code not found"})
 		return
 	}
@@ -276,91 +233,80 @@ func UpdateReferralCodeStatus(c *gin.Context) {
 }
 
 // ─────────────────────────────────────────────
-// ADMIN: Commission Management
+// ADMIN: Statistik per Referral Code
 // ─────────────────────────────────────────────
 
-// GET /admin/referrals/commissions
-func AdminGetCommissions(c *gin.Context) {
-	role, _ := c.Get("userRole")
-	userID, _ := c.Get("userID")
+// GET /admin/referrals/:id/stats
+func GetReferralStats(c *gin.Context) {
+	id := c.Param("id")
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	offset := (page - 1) * limit
-	statusFilter := c.Query("status")
-
-	query := config.DB.Preload("ReferralCode").Preload("Marketer").Preload("Order")
-
-	// Organizer / marketer hanya lihat commission milik mereka
-	if role != "admin" {
-		query = query.Where("marketer_id = ?", userID)
+	var code models.ReferralCode
+	if err := config.DB.Preload("User").Preload("Event").First(&code, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Referral code not found"})
+		return
 	}
 
-	if statusFilter != "" {
-		query = query.Where("status = ?", statusFilter)
+	// Status yang dihitung sebagai sales (kecuali cancelled)
+	validStatuses := []string{"pending", "paid", "success", "SUCCESSFUL"}
+
+	// 1. Total orders
+	var totalOrders int64
+	config.DB.Model(&models.Order{}).Where("referral_code = ? AND status IN ?", code.Code, validStatuses).Count(&totalOrders)
+
+	// 2. Total tiket terjual
+	var totalTickets int64
+	config.DB.Model(&models.Ticket{}).
+		Joins("JOIN orders ON orders.id = tickets.order_id").
+		Where("orders.referral_code = ? AND orders.status IN ?", code.Code, validStatuses).
+		Count(&totalTickets)
+
+	// 3. Total revenue (Ticket Sales Gross)
+	var totalRevenue float64
+	config.DB.Model(&models.Order{}).
+		Select("COALESCE(SUM(total_amount - admin_fee - unique_code), 0)").
+		Where("referral_code = ? AND status IN ?", code.Code, validStatuses).
+		Scan(&totalRevenue)
+
+	// 4. Total discount given
+	var totalDiscount float64
+	config.DB.Model(&models.Order{}).
+		Select("COALESCE(SUM(discount_amount), 0)").
+		Where("referral_code = ? AND status IN ?", code.Code, validStatuses).
+		Scan(&totalDiscount)
+
+	// 5. Total Pendapatan Mitra (MARKETER REVENUE)
+	// Kalkulasi berdasarkan RewardType & RewardValue
+	var totalEarnings float64
+	if code.RewardType == "fixed" {
+		totalEarnings = float64(totalOrders) * code.RewardValue
+	} else if code.RewardType == "percent" {
+		totalEarnings = totalRevenue * (code.RewardValue / 100)
 	}
 
-	var total int64
-	query.Model(&models.ReferralCommission{}).Count(&total)
-
-	var commissions []models.ReferralCommission
-	query.Order("created_at DESC").Limit(limit).Offset(offset).Find(&commissions)
-
-	totalPages := int(total) / limit
-	if int(total)%limit != 0 {
-		totalPages++
-	}
-
-	// Calculate total pending commission
-	var totalPending float64
-	pendingQuery := config.DB.Model(&models.ReferralCommission{}).Select("COALESCE(SUM(commission_amount), 0)").Where("status = ?", "pending")
-	if role != "admin" {
-		pendingQuery = pendingQuery.Where("marketer_id = ?", userID)
-	}
-	pendingQuery.Scan(&totalPending)
+	var recentOrders []models.Order
+	config.DB.Where("referral_code = ?", code.Code).
+		Order("created_at DESC").
+		Limit(10).
+		Find(&recentOrders)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"commissions": commissions,
-			"summary": gin.H{
-				"total_pending": totalPending,
+			"referral_code": code,
+			"stats": gin.H{
+				"total_orders":   totalOrders,
+				"total_tickets":  totalTickets,
+				"total_revenue":  totalRevenue,  // Omzet Penjualan
+				"total_discount": totalDiscount, // Diskon yang dikeluarkan
+				"total_earnings": totalEarnings, // Komisi untuk mitra (Revenue mereka)
+				"commission_info": gin.H{
+					"type":  code.RewardType,
+					"value": code.RewardValue,
+				},
 			},
-			"pagination": gin.H{
-				"current_page": page,
-				"total_pages":  totalPages,
-				"total_items":  total,
-				"per_page":     limit,
-			},
+			"recent_orders": recentOrders,
 		},
 	})
-}
-
-// PATCH /admin/referrals/commissions/:id/status
-func UpdateCommissionStatus(c *gin.Context) {
-	id := c.Param("id")
-
-	var input struct {
-		Status string `json:"status" binding:"required"` // paid, cancelled
-	}
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
-		return
-	}
-
-	if input.Status != "paid" && input.Status != "cancelled" {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Status must be 'paid' or 'cancelled'"})
-		return
-	}
-
-	var commission models.ReferralCommission
-	if err := config.DB.First(&commission, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Commission not found"})
-		return
-	}
-
-	config.DB.Model(&commission).Update("status", input.Status)
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": commission})
 }
 
 // ─────────────────────────────────────────────
@@ -376,26 +322,21 @@ func ValidateReferralCode(c *gin.Context) {
 	}
 
 	var referral models.ReferralCode
-	query := config.DB.Preload("User").Where("code = ? AND is_active = true", code)
-
-	if err := query.First(&referral).Error; err != nil {
+	if err := config.DB.Where("code = ? AND is_active = true", code).First(&referral).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Referral code tidak ditemukan atau tidak aktif"})
 		return
 	}
 
-	// Check expiry
 	if referral.ExpiresAt != nil && referral.ExpiresAt.Before(time.Now()) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Referral code sudah kadaluarsa"})
 		return
 	}
 
-	// Check max uses
 	if referral.MaxUses > 0 && referral.UsedCount >= referral.MaxUses {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Referral code sudah mencapai batas penggunaan"})
 		return
 	}
 
-	// If event scoped, validate against requested event_id
 	if referral.EventID != nil {
 		eventIDStr := c.Query("event_id")
 		if eventIDStr != "" {
@@ -411,85 +352,10 @@ func ValidateReferralCode(c *gin.Context) {
 		"success": true,
 		"data": gin.H{
 			"code":           referral.Code,
-			"marketer_name":  referral.User.Name,
+			"partner_name":   referral.PartnerName,
 			"discount_type":  referral.DiscountType,
 			"discount_value": referral.DiscountValue,
 			"event_id":       referral.EventID,
 		},
 	})
-}
-
-// ─────────────────────────────────────────────
-// INTERNAL: Apply Referral During Order
-// Called from CreateOrder when referral_code is provided
-// ─────────────────────────────────────────────
-
-// ApplyReferralCode validates the referral and creates commission record.
-// Returns (discountAmount, error)
-func ApplyReferralCode(tx *gorm.DB, code string, order *models.Order, totalAmount float64) (float64, error) {
-	code = strings.ToUpper(strings.TrimSpace(code))
-	if code == "" {
-		return 0, nil
-	}
-
-	var referral models.ReferralCode
-	if err := tx.Where("code = ? AND is_active = true", code).First(&referral).Error; err != nil {
-		return 0, nil // Code not found → ignore silently in checkout context
-	}
-
-	// Check expiry
-	if referral.ExpiresAt != nil && referral.ExpiresAt.Before(time.Now()) {
-		return 0, nil
-	}
-
-	// Check max uses
-	if referral.MaxUses > 0 && referral.UsedCount >= referral.MaxUses {
-		return 0, nil
-	}
-
-	// Event scope check
-	if referral.EventID != nil {
-		// Check if any ticket in the order belongs to the event
-		var count int64
-		tx.Model(&models.Ticket{}).Where("order_id = ? AND event_id = ?", order.ID, *referral.EventID).Count(&count)
-		// Note: order.ID may be 0 here (pre-save), so we use order items — handle in CreateOrder instead
-	}
-
-	// Calculate discount for buyer
-	var discountAmount float64
-	if referral.DiscountType == "percent" && referral.DiscountValue > 0 {
-		discountAmount = totalAmount * (referral.DiscountValue / 100)
-	} else if referral.DiscountType == "fixed" && referral.DiscountValue > 0 {
-		discountAmount = referral.DiscountValue
-		if discountAmount > totalAmount {
-			discountAmount = totalAmount
-		}
-	}
-
-	// Calculate marketer commission
-	var commissionAmount float64
-	if referral.RewardType == "percent" && referral.RewardValue > 0 {
-		commissionAmount = totalAmount * (referral.RewardValue / 100)
-	} else if referral.RewardType == "fixed" && referral.RewardValue > 0 {
-		commissionAmount = referral.RewardValue
-	}
-
-	// Increment used_count
-	tx.Model(&referral).Update("used_count", gorm.Expr("used_count + ?", 1))
-
-	// Commission will be recorded after order is saved (order.ID is needed)
-	// Return a closure pattern via storing in function — we'll handle in CreateOrder via direct call
-	// For now, if order.ID is available we immediately record, otherwise caller must do it.
-	if order.ID > 0 && commissionAmount > 0 {
-		commission := models.ReferralCommission{
-			ReferralCodeID:   referral.ID,
-			MarketerID:       referral.UserID,
-			OrderID:          order.ID,
-			CommissionAmount: commissionAmount,
-			Status:           "pending",
-		}
-		tx.Create(&commission)
-	}
-
-	return discountAmount, nil
 }
