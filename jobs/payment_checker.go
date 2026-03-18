@@ -67,16 +67,14 @@ func CheckBankJagoEmails(source string) {
 	criteria := imap.NewSearchCriteria()
 	criteria.Since = time.Now().Add(-24 * time.Hour)
 	criteria.WithoutFlags = []string{imap.SeenFlag} // Hanya cari yang UNSEEN (belum dibaca)
-	// Cari email yang mengandung frase notifikasi transfer masuk Jago
-	criteria.Text = []string{"sejumlah uang"}
 
-	log.Printf("[%s-PaymentJob] Checking for UNSEEN Jago emails containing 'sejumlah uang'...", source)
+	log.Printf("[%s-PaymentJob] Fetching unread emails from last 24h...", source)
 	ids, err := c.Search(criteria)
 	if err != nil {
 		log.Println("[PaymentJob] Search error:", err)
 		return
 	}
-	log.Printf("[%s-PaymentJob] Found %d potential Jago emails\n", source, len(ids))
+	log.Printf("[%s-PaymentJob] Found %d total unseen emails in Inbox\n", source, len(ids))
 
 	if len(ids) == 0 {
 		return
@@ -96,7 +94,20 @@ func CheckBankJagoEmails(source string) {
 	}()
 
 	for msg := range messages {
-		log.Printf("[%s-PaymentJob] Processing Email Subject: %s\n", source, msg.Envelope.Subject)
+		subject := strings.ToLower(msg.Envelope.Subject)
+		from := ""
+		if len(msg.Envelope.From) > 0 {
+			from = strings.ToLower(msg.Envelope.From[0].Address())
+		}
+
+		log.Printf("[%s-PaymentJob] Scanner: %s (From: %s)\n", source, msg.Envelope.Subject, from)
+
+		// Filter manual dalam Go agar tidak tergantung filter server IMAP yang kaku
+		if !strings.Contains(subject, "sejumlah uang") && !strings.Contains(from, "jago.com") {
+			continue
+		}
+
+		log.Printf("[%s-PaymentJob] MATCH! Processing: %s\n", source, msg.Envelope.Subject)
 		r := msg.GetBody(&section)
 		if r == nil {
 			continue
