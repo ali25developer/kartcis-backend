@@ -66,17 +66,17 @@ func CheckBankJagoEmails(source string) {
 
 	criteria := imap.NewSearchCriteria()
 	criteria.Since = time.Now().Add(-24 * time.Hour)
-	criteria.WithoutFlags = []string{imap.SeenFlag} // Hanya cari yang UNSEEN (belum dibaca)
-	// Broaden to anything from jago.com to handle no-reply or noreply
-	criteria.Header.Set("From", "jago.com")
+	// Cari email yang mengandung frase notifikasi transfer masuk Jago
+	// Hapus WithoutFlags(SeenFlag) agar email yang sudah Anda buka tetap terbaca
+	criteria.Text = []string{"sejumlah uang"}
 
-	log.Printf("[%s-PaymentJob] Checking for new unseen emails...", source)
+	log.Printf("[%s-PaymentJob] Checking for Jago emails containing 'sejumlah uang' (last 24h)...", source)
 	ids, err := c.Search(criteria)
-	log.Printf("[%s-PaymentJob] Found %d matching emails in last 24h\n", source, len(ids))
 	if err != nil {
 		log.Println("[PaymentJob] Search error:", err)
 		return
 	}
+	log.Printf("[%s-PaymentJob] Found %d potential Jago emails\n", source, len(ids))
 
 	if len(ids) == 0 {
 		return
@@ -191,8 +191,9 @@ func ProcessJagoEmail(body string, source string, messageID string, emailDate ti
 	// reviving invalid orders (especially due to past duplicate unique code bugs)
 	statusOptions := []string{"pending"}
 
+	// Toleransi 10 menit (email bank kadang sedikit telat dari detik pembuatan order)
 	if err := tx.Where("status IN ? AND total_amount = ? AND created_at <= ?",
-		statusOptions, amount, emailDate.Add(2*time.Minute)).
+		statusOptions, amount, emailDate.Add(10*time.Minute)).
 		Order("created_at desc").
 		First(&order).Error; err != nil {
 		// Log matching failed (Maybe already Paid or not our order)
