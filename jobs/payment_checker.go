@@ -66,11 +66,11 @@ func CheckBankJagoEmails(source string) {
 
 	criteria := imap.NewSearchCriteria()
 	criteria.Since = time.Now().Add(-24 * time.Hour)
+	criteria.WithoutFlags = []string{imap.SeenFlag} // Hanya cari yang UNSEEN (belum dibaca)
 	// Cari email yang mengandung frase notifikasi transfer masuk Jago
-	// Hapus WithoutFlags(SeenFlag) agar email yang sudah Anda buka tetap terbaca
 	criteria.Text = []string{"sejumlah uang"}
 
-	log.Printf("[%s-PaymentJob] Checking for Jago emails containing 'sejumlah uang' (last 24h)...", source)
+	log.Printf("[%s-PaymentJob] Checking for UNSEEN Jago emails containing 'sejumlah uang'...", source)
 	ids, err := c.Search(criteria)
 	if err != nil {
 		log.Println("[PaymentJob] Search error:", err)
