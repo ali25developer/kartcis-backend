@@ -67,14 +67,16 @@ func CheckBankJagoEmails(source string) {
 	criteria := imap.NewSearchCriteria()
 	criteria.Since = time.Now().Add(-24 * time.Hour)
 	criteria.WithoutFlags = []string{imap.SeenFlag} // Hanya cari yang UNSEEN (belum dibaca)
+	// Server-side filter to minimize fetching thousands of emails
+	criteria.Text = []string{"sejumlah uang"}
 
-	log.Printf("[%s-PaymentJob] Fetching unread emails from last 24h...", source)
+	log.Printf("[%s-PaymentJob] Searching for UNSEEN Jago emails in Inbox...", source)
 	ids, err := c.Search(criteria)
 	if err != nil {
 		log.Println("[PaymentJob] Search error:", err)
 		return
 	}
-	log.Printf("[%s-PaymentJob] Found %d total unseen emails in Inbox\n", source, len(ids))
+	log.Printf("[%s-PaymentJob] Found %d matching unseen emails\n", source, len(ids))
 
 	if len(ids) == 0 {
 		return
@@ -85,6 +87,7 @@ func CheckBankJagoEmails(source string) {
 
 	// Get the whole message body
 	var section imap.BodySectionName
+	section.Peek = true // PREVENT marking as Seen here, we will mark it manually or let the loop decide.
 	items := []imap.FetchItem{section.FetchItem(), imap.FetchEnvelope}
 
 	messages := make(chan *imap.Message, 10)
@@ -142,6 +145,13 @@ func CheckBankJagoEmails(source string) {
 		if body != "" {
 			ProcessJagoEmail(body, source, msg.Envelope.MessageId, msg.Envelope.Date)
 		}
+
+		// After processing, mark as SEEN manually only if it was indeed our target email
+		// or just finish here since the search will skip it next time if it belongs to Jago.
+		// Actually, let's mark it SEEN now so we don't scan it again next minute.
+		item := new(imap.SeqSet)
+		item.AddNum(msg.SeqNum)
+		c.Store(item, imap.FormatFlagsOp(imap.AddFlags, true), []interface{}{imap.SeenFlag}, nil)
 	}
 
 	if err := <-done; err != nil {
@@ -198,16 +208,22 @@ func ProcessJagoEmail(body string, source string, messageID string, emailDate ti
 
 	// 3. Search for matching order
 	var order models.Order
-	// ONLY check pending orders. Do NOT check expired/cancelled to prevent
-	// reviving invalid orders (especially due to past duplicate unique code bugs)
 	statusOptions := []string{"pending"}
 
-	// Toleransi 10 menit (email bank kadang sedikit telat dari detik pembuatan order)
-	if err := tx.Where("status IN ? AND total_amount = ? AND created_at <= ?",
-		statusOptions, amount, emailDate.Add(10*time.Minute)).
+	// Pencarian LEBIH KETAT:
+	// - Status harus pending
+	// - Nominal harus sama persis
+	// - Waktu order harus di sekitar waktu email (misal: 24 jam sebelum s/d 10 menit sesudah email)
+	//   Ini mencegah email hari ini mencocokkan order dengan nominal sama dari setahun lalu.
+	windowStart := emailDate.Add(-24 * time.Hour)
+	windowEnd := emailDate.Add(10 * time.Minute)
+
+	if err := tx.Where("status IN ? AND total_amount = ? AND created_at BETWEEN ? AND ?",
+		statusOptions, amount, windowStart, windowEnd).
 		Order("created_at desc").
 		First(&order).Error; err != nil {
 		// Log matching failed (Maybe already Paid or not our order)
+		log.Printf("[%s-PaymentJob] No pending order matched Amount: %.2f within time window\n", source, amount)
 		// We STILL record this message ID to prevent re-processing every minute
 		tx.Create(&models.BankTransaction{
 			ReferenceID:     messageID,
