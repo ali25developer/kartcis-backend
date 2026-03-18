@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"time"
@@ -230,7 +231,7 @@ func generateToken(user models.User) (string, error) {
 	// In production use proper secret from env
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
-		secret = "secret123"
+		return "", fmt.Errorf("JWT_SECRET not found in environment")
 	}
 
 	claims := jwt.MapClaims{

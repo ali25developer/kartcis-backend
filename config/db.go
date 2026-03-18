@@ -19,8 +19,7 @@ func ConnectDB() {
 
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		dsn = "host=localhost user=postgres password=postgres dbname=kartcis port=5432 sslmode=disable"
-		fmt.Println("Warning: DATABASE_URL not found, using default:", dsn)
+		log.Fatal("DATABASE_URL not found in environment")
 	}
 
 	var err error
