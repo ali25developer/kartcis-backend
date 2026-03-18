@@ -215,6 +215,10 @@ func SetupRouter() *gin.Engine {
 
 		// Site Settings
 		superAdmin.PUT("/settings", controllers.UpdateSettings)
+
+		// WhatsApp Broadcast
+		superAdmin.GET("/broadcast/wa/qr", controllers.GetWAStatus)
+		superAdmin.POST("/broadcast/wa/send", controllers.BroadcastWA)
 	}
 
 	// Public Settings (Already outside)

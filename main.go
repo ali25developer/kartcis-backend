@@ -8,11 +8,13 @@ import (
 	"kartcis-backend/config"
 	"kartcis-backend/jobs"
 	"kartcis-backend/routes"
+	"kartcis-backend/utils"
 )
 
 func main() {
 	// Connect to Database
 	config.ConnectDB()
+	utils.InitWA() // Initialize WhatsApp Client
 
 	// Start Background Jobs
 	jobs.StartOrderExpiryJob()

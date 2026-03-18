@@ -16,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	"math"
 )
 
 type CheckoutRequest struct {
@@ -475,11 +476,12 @@ func CreateOrder(c *gin.Context) {
 		}
 	}
 
-	// Handle Unique Code for Manual Bank Transfer
+	// Handle Unique Code for Manual Bank Transfer (Enabled for all since Flip is disabled)
 	var uniqueCode int
-	if strings.HasPrefix(req.PaymentMethod, "BANK_TRANSFER_") || req.PaymentMethod == "MANUAL_JAGO" {
+	if true { // Always generate for manual verification
 		// Generate unique code and ensure TOTAL AMOUNT is unique for pending orders
-		baseAmount := totalAmount + totalAdminFee - discountAmount - referralDiscount
+		// Round base amount to nearest integer for IDR before adding unique code
+		baseAmount := math.Round(totalAmount + totalAdminFee - discountAmount - referralDiscount)
 
 		// 1. Get ALL codes used in the last 3 hours
 		var usedCodes []int
@@ -518,9 +520,9 @@ func CreateOrder(c *gin.Context) {
 		CustomerName:   customerName,
 		CustomerEmail:  customerEmail,
 		CustomerPhone:  customerPhone,
-		TotalAmount:    totalAmount + totalAdminFee - discountAmount - referralDiscount + float64(uniqueCode),
-		AdminFee:       totalAdminFee,
-		DiscountAmount: discountAmount + referralDiscount, // Combined discount
+		TotalAmount:    math.Round(totalAmount + totalAdminFee - discountAmount - referralDiscount) + float64(uniqueCode),
+		AdminFee:       math.Round(totalAdminFee),
+		DiscountAmount: math.Round(discountAmount + referralDiscount), // Combined discount
 		VoucherCode:    appliedVoucherCode,
 		ReferralCode:   appliedReferralCode,
 		UniqueCode:     uniqueCode,
@@ -533,7 +535,7 @@ func CreateOrder(c *gin.Context) {
 	log.Printf("[Order] Processing payment gateway for method: %s", req.PaymentMethod)
 	if err := processPaymentGateway(&order, req.PaymentMethod, userID); err != nil {
 		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Flip API Error: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Payment Verification Error: " + err.Error()})
 		return
 	}
 
@@ -962,6 +964,7 @@ func restoreVoucherAndReferral(tx *gorm.DB, order models.Order) error {
 
 // processPaymentGateway abstracts the payment generation logic.
 func processPaymentGateway(order *models.Order, paymentMethod string, userID *uint) error {
+	/* Disabling Flip for now as it's not working in prod
 	pm := strings.ToUpper(strings.TrimSpace(paymentMethod))
 	if !strings.HasPrefix(pm, "BANK_TRANSFER_") && pm != "MANUAL_JAGO" {
 		if os.Getenv("FLIP_API_KEY") != "" {
@@ -974,62 +977,21 @@ func processPaymentGateway(order *models.Order, paymentMethod string, userID *ui
 			return err
 		}
 	}
-
-	/*
-		// 1. Virtual Accounts (BCA, Mandiri, BNI, BRI, etc.)
-		if strings.Contains(pm, "VA") {
-			bankCode := "88888" // Default
-			if strings.Contains(pm, "BCA") {
-				bankCode = "70012"
-			} else if strings.Contains(pm, "MANDIRI") {
-				bankCode = "88888"
-			} else if strings.Contains(pm, "BNI") {
-				bankCode = "88881"
-			} else if strings.Contains(pm, "BRI") {
-				bankCode = "88882"
-			}
-
-			idForVA := 0
-			if userID != nil {
-				idForVA = int(*userID)
-			} else {
-				idForVA = 99999 // Guest
-			}
-
-			userIDPadded := fmt.Sprintf("%05d", idForVA)
-			timestamp := fmt.Sprintf("%06d", time.Now().Unix()%1000000)
-			order.VirtualAccountNumber = fmt.Sprintf("%s%s%s", bankCode, userIDPadded, timestamp)
-			return nil
-		}
-
-		// 2. E-Wallets / QRIS (OVO, Dana, ShopeePay, LinkAja)
-		if strings.Contains(pm, "QRIS") || strings.Contains(pm, "OVO") || strings.Contains(pm, "DANA") {
-			order.PaymentURL = fmt.Sprintf("https://simulator.kartcis.id/pay/%s", order.OrderNumber)
-			return nil
-		}
-
-		// 3. Retail Outlet (Alfamart/Indomaret)
-		if strings.Contains(pm, "ALFAMART") || strings.Contains(pm, "INDOMARET") {
-			order.VirtualAccountNumber = fmt.Sprintf("ALFA-%d", time.Now().UnixNano()%100000000)
-			return nil
-		}
-
-		// 4. Bank Transfer Manual (Jago) — diverifikasi otomatis via email scraping
-		if strings.HasPrefix(pm, "BANK_TRANSFER_") || pm == "MANUAL_JAGO" {
-			accNo := os.Getenv("JAGO_ACCOUNT_NUMBER")
-			accName := os.Getenv("JAGO_ACCOUNT_NAME")
-			if accNo == "" {
-				accNo = "1010101020" // Default Demo
-				accName = "Kartcis Demo Account"
-			}
-			order.VirtualAccountNumber = accNo
-			order.PaymentData = accName
-			order.PaymentInstructions = fmt.Sprintf(
-				"Silakan transfer ke Bank Jago: %s a/n %s. Pastikan nominal sampai 3 digit terakhir (Rp %v) agar dapat diverifikasi otomatis.",
-				accNo, accName, utils.FormatPrice(order.TotalAmount),
-			)
-			return nil
-		}
 	*/
+
+	// Default to Manual Jago for all payments for now
+	order.PaymentMethod = "MANUAL_JAGO"
+	accNo := os.Getenv("JAGO_ACCOUNT_NUMBER")
+	accName := os.Getenv("JAGO_ACCOUNT_NAME")
+	if accNo == "" {
+		accNo = "1010101020" // Default Demo
+		accName = "Kartcis Demo Account"
+	}
+	order.VirtualAccountNumber = accNo
+	order.PaymentData = accName
+	order.PaymentInstructions = fmt.Sprintf(
+		"Silakan transfer ke Bank Jago: %s a/n %s. Pastikan nominal sampai 3 digit terakhir (Rp %v) agar dapat diverifikasi otomatis.",
+		accNo, accName, utils.FormatPrice(order.TotalAmount),
+	)
 	return nil
 }
